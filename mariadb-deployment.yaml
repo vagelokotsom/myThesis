@@ -1,0 +1,60 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mariadb-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mariadb
+spec:
+  selector:
+    matchLabels:
+      app: mariadb
+  template:
+    metadata:
+      labels:
+        app: mariadb
+    spec:
+      containers:
+        - name: mariadb
+          image: mariadb:11
+          env:
+            - name: MARIADB_ROOT_PASSWORD
+              value: rootpassword
+            - name: MARIADB_DATABASE
+              value: thesisdb
+            - name: MARIADB_USER
+              value: thesisuser
+            - name: MARIADB_PASSWORD
+              value: thesispass
+          ports:
+            - containerPort: 3306
+          volumeMounts:
+            - name: mariadb-storage
+              mountPath: /var/lib/mysql
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+      volumes:
+        - name: mariadb-storage
+          persistentVolumeClaim:
+            claimName: mariadb-pvc
+        - name: init-scripts
+          configMap:
+            name: mariadb-init-scripts
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mariadb
+spec:
+  ports:
+    - port: 3306
+  selector:
+    app: mariadb

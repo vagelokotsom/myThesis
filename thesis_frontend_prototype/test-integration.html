@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Frontend-Backend Integration Test</title>
+</head>
+<body>
+    <h1>Frontend-Backend Integration Test</h1>
+    <div>
+        <h2>Test Login</h2>
+        <button onclick="testLogin()">Test Login</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        async function testLogin() {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerHTML = 'Testing...';
+            
+            try {
+                const response = await fetch('http://localhost:8080/api/auth/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: 'teacher',
+                        password: 'teacher123'
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    resultDiv.innerHTML = `
+                        <div style="color: green;">
+                            <h3>✅ SUCCESS!</h3>
+                            <p>Token: ${data.token.substring(0, 50)}...</p>
+                            <p>Username: ${data.username}</p>
+                            <p>Role: ${data.role}</p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<div style="color: red;">❌ Error: ${response.status} ${response.statusText}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div style="color: red;">❌ Network Error: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html>

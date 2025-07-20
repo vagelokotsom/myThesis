@@ -1,0 +1,40 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mariadb-init-scripts
+data:
+  init.sql: |
+    USE thesisdb;
+
+    -- Create roles enum type
+    CREATE TABLE IF NOT EXISTS roles (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        name VARCHAR(50) NOT NULL UNIQUE
+    );
+
+    -- Insert roles if they don't exist
+    INSERT IGNORE INTO roles (name) VALUES ('ROLE_TEACHER'), ('ROLE_STUDENT');
+
+    -- Create users table if it doesn't exist
+    CREATE TABLE IF NOT EXISTS users (
+        id BIGINT PRIMARY KEY AUTO_INCREMENT,
+        username VARCHAR(255) NOT NULL UNIQUE,
+        password VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL UNIQUE,
+        role_id INT,
+        FOREIGN KEY (role_id) REFERENCES roles(id)
+    );
+
+    -- Insert a test teacher user (password: teacher123)
+    INSERT IGNORE INTO users (username, password, email, role_id)
+    SELECT 'teacher', '$2a$10$8.UnVuG9HHgffUDAlk8qfOuVGkqRzgVymGe07xd00DMxs.AQubh4a', 'teacher@example.com', r.id
+    FROM roles r
+    WHERE r.name = 'ROLE_TEACHER'
+    AND NOT EXISTS (SELECT 1 FROM users WHERE username = 'teacher');
+
+    -- Insert a test student user (password: student123)
+    INSERT IGNORE INTO users (username, password, email, role_id)
+    SELECT 'student', '$2a$10$3GyqKpUZX2peHx7xqHSmN.FDFf5GQFMiV7d.8O.V4IcXpuL9P5gOi', 'student@example.com', r.id
+    FROM roles r
+    WHERE r.name = 'ROLE_STUDENT'
+    AND NOT EXISTS (SELECT 1 FROM users WHERE username = 'student');
