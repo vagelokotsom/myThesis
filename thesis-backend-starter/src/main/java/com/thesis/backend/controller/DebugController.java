@@ -26,12 +26,7 @@ public class DebugController {
             // Create a safe representation without exposing full passwords
             List<Object> userData = users.stream().map(user -> {
                 return new Object() {
-                    public final String username = user.getUsername();
-                    public final String email = user.getEmail(); 
-                    public final String role = user.getRole();
-                    public final String passwordStart = user.getPassword() != null ? 
-                        user.getPassword().substring(0, Math.min(20, user.getPassword().length())) + "..." : "null";
-                    public final int passwordLength = user.getPassword() != null ? user.getPassword().length() : 0;
+                    // Removed unused fields
                 };
             }).collect(Collectors.toList());
             

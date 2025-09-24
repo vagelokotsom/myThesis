@@ -4,7 +4,7 @@ package com.thesis.backend.controller;
 import com.thesis.backend.entity.ImageTemplate;
 import com.thesis.backend.repository.ImageTemplateRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.access.prepost.PreAuthorize;
+// Removed unused import
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;

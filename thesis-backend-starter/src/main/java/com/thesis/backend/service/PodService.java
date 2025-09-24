@@ -60,12 +60,12 @@ public class PodService {
     /**
      * Create a new pod
      */
-    public KubernetesPod createPod(String namespace, String name, String image, 
-                                  Map<String, String> labels, Map<String, String> resources) {
-        
+    public KubernetesPod createPod(String namespace, String name, String image,
+            Map<String, String> labels, Map<String, String> resources) {
+
         Map<String, Quantity> resourceLimits = new HashMap<>();
         Map<String, Quantity> resourceRequests = new HashMap<>();
-        
+
         if (resources.containsKey("cpu-limit")) {
             resourceLimits.put("cpu", new Quantity(resources.get("cpu-limit")));
         }
@@ -81,23 +81,23 @@ public class PodService {
 
         Pod pod = new PodBuilder()
                 .withNewMetadata()
-                    .withName(name)
-                    .withNamespace(namespace)
-                    .withLabels(labels)
+                .withName(name)
+                .withNamespace(namespace)
+                .withLabels(labels)
                 .endMetadata()
                 .withNewSpec()
-                    .addNewContainer()
-                        .withName(name)
-                        .withImage(image)
-                        .withNewResources()
-                            .withLimits(resourceLimits)
-                            .withRequests(resourceRequests)
-                        .endResources()
-                    .endContainer()
+                .addNewContainer()
+                .withName(name)
+                .withImage(image)
+                .withNewResources()
+                .withLimits(resourceLimits)
+                .withRequests(resourceRequests)
+                .endResources()
+                .endContainer()
                 .endSpec()
                 .build();
 
-        Pod createdPod = kubernetesClient.pods().inNamespace(namespace).create(pod);
+        Pod createdPod = kubernetesClient.pods().inNamespace(namespace).resource(pod).create();
         return mapPodToDto(createdPod);
     }
 
@@ -111,12 +111,11 @@ public class PodService {
     /**
      * Update pod resources
      */
-    public KubernetesPod updatePodResources(String namespace, String name, 
-                                          Map<String, String> resources) {
-        
+    public KubernetesPod updatePodResources(String namespace, String name,
+            Map<String, String> resources) {
+
         PodResource podResource = kubernetesClient.pods().inNamespace(namespace).withName(name);
 
-        
         Pod existingPod = podResource.get();
         if (existingPod == null) {
             return null;
@@ -124,7 +123,7 @@ public class PodService {
 
         Map<String, Quantity> resourceLimits = new HashMap<>();
         Map<String, Quantity> resourceRequests = new HashMap<>();
-        
+
         if (resources.containsKey("cpu-limit")) {
             resourceLimits.put("cpu", new Quantity(resources.get("cpu-limit")));
         }
@@ -140,16 +139,16 @@ public class PodService {
 
         Pod updatedPod = new PodBuilder(existingPod)
                 .editSpec()
-                    .editContainer(0)
-                        .editResources()
-                            .withLimits(resourceLimits)
-                            .withRequests(resourceRequests)
-                        .endResources()
-                    .endContainer()
+                .editContainer(0)
+                .editResources()
+                .withLimits(resourceLimits)
+                .withRequests(resourceRequests)
+                .endResources()
+                .endContainer()
                 .endSpec()
                 .build();
 
-        Pod result = podResource.replace(updatedPod);
+        Pod result = kubernetesClient.pods().inNamespace(namespace).resource(updatedPod).update();
         return mapPodToDto(result);
     }
 
@@ -161,46 +160,50 @@ public class PodService {
         kubernetesPod.setName(pod.getMetadata().getName());
         kubernetesPod.setNamespace(pod.getMetadata().getNamespace());
         kubernetesPod.setStatus(pod.getStatus().getPhase());
-        
+
         if (pod.getStatus().getPodIP() != null) {
             kubernetesPod.setIp(pod.getStatus().getPodIP());
         }
-        
+
         if (pod.getMetadata().getLabels() != null) {
             kubernetesPod.setLabels(pod.getMetadata().getLabels());
         }
-        
+
         // Extract resource limits/requests if available
-        if (pod.getSpec() != null && 
-            pod.getSpec().getContainers() != null && 
-            !pod.getSpec().getContainers().isEmpty() && 
-            pod.getSpec().getContainers().get(0).getResources() != null) {
-            
+        if (pod.getSpec() != null &&
+                pod.getSpec().getContainers() != null &&
+                !pod.getSpec().getContainers().isEmpty() &&
+                pod.getSpec().getContainers().get(0).getResources() != null) {
+
             Map<String, String> resources = new HashMap<>();
-            
+
             // CPU & Memory Limits
             if (pod.getSpec().getContainers().get(0).getResources().getLimits() != null) {
                 if (pod.getSpec().getContainers().get(0).getResources().getLimits().containsKey("cpu")) {
-                    resources.put("cpu-limit", pod.getSpec().getContainers().get(0).getResources().getLimits().get("cpu").toString());
+                    resources.put("cpu-limit",
+                            pod.getSpec().getContainers().get(0).getResources().getLimits().get("cpu").toString());
                 }
                 if (pod.getSpec().getContainers().get(0).getResources().getLimits().containsKey("memory")) {
-                    resources.put("memory-limit", pod.getSpec().getContainers().get(0).getResources().getLimits().get("memory").toString());
+                    resources.put("memory-limit",
+                            pod.getSpec().getContainers().get(0).getResources().getLimits().get("memory").toString());
                 }
             }
-            
+
             // CPU & Memory Requests
             if (pod.getSpec().getContainers().get(0).getResources().getRequests() != null) {
                 if (pod.getSpec().getContainers().get(0).getResources().getRequests().containsKey("cpu")) {
-                    resources.put("cpu-request", pod.getSpec().getContainers().get(0).getResources().getRequests().get("cpu").toString());
+                    resources.put("cpu-request",
+                            pod.getSpec().getContainers().get(0).getResources().getRequests().get("cpu").toString());
                 }
                 if (pod.getSpec().getContainers().get(0).getResources().getRequests().containsKey("memory")) {
-                    resources.put("memory-request", pod.getSpec().getContainers().get(0).getResources().getRequests().get("memory").toString());
+                    resources.put("memory-request",
+                            pod.getSpec().getContainers().get(0).getResources().getRequests().get("memory").toString());
                 }
             }
-            
+
             kubernetesPod.setResources(resources);
         }
-        
+
         return kubernetesPod;
     }
 }

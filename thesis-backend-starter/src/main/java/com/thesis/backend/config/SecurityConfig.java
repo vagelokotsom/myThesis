@@ -2,7 +2,7 @@ package com.thesis.backend.config;
 
 import com.thesis.backend.security.JwtAuthenticationFilter;
 import com.thesis.backend.service.UserDetailsServiceImpl;
-import org.springframework.beans.factory.annotation.Autowired;
+// Removed unused import
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;

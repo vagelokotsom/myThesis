@@ -1,13 +1,38 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Button, Alert, Badge, ProgressBar } from 'react-bootstrap';
-import { FaServer, FaUsers, FaDocker, FaCube, FaPlay, FaStop, FaPlus } from 'react-icons/fa';
-import { toast } from 'react-toastify';
+import { Container, Row, Col, Card, Button, Alert, Badge } from 'react-bootstrap';
+import { FaServer, FaUsers, FaDocker, FaCube, FaPlus } from 'react-icons/fa';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
 
 const Dashboard = () => {
   const { user, isAuthenticated } = useAuth();
+  // Get user role from auth context
+  const userRole = user?.role || 'STUDENT';
+
+  const fetchDashboardData = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      // Fetch different data based on user role
+      if (userRole === 'TEACHER') {
+        await Promise.all([
+          fetchTeacherStatistics(),
+          fetchRecentActivities(),
+          fetchSystemStatus()
+        ]);
+      } else {
+        await Promise.all([
+          fetchStudentStatistics(),
+          fetchStudentActivities()
+        ]);
+      }
+      setError(null);
+    } catch (err) {
+      setError('Failed to load dashboard data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [userRole, isAuthenticated, user]);
   const [dashboardData, setDashboardData] = useState({
     statistics: {
       totalPods: 0,
@@ -31,16 +56,15 @@ const Dashboard = () => {
   const [error, setError] = useState(null);
   const navigate = useNavigate();
 
-  // Get user role from auth context
-  const userRole = user?.role || 'STUDENT';
+  // Redirect admin to superadmin dashboard
+  useEffect(() => {
+    if (isAuthenticated && user?.role === 'ROLE_ADMIN') {
+      navigate('/superadmin', { replace: true });
+      return;
+    }
+  }, [isAuthenticated, user, navigate]);
 
   useEffect(() => {
-    console.log('=== Dashboard useEffect Debug ===');
-    console.log('localStorage user:', localStorage.getItem('user'));
-    console.log('localStorage authToken:', localStorage.getItem('authToken'));
-    console.log('user from context:', user);
-    console.log('isAuthenticated from context:', isAuthenticated);
-    
     if (isAuthenticated && user) {
       fetchDashboardData();
     }
@@ -48,46 +72,14 @@ const Dashboard = () => {
       if (isAuthenticated && user) {
         fetchDashboardData();
       }
-    }, 30000); // Refresh every 30 seconds
+    }, 30000);
     return () => clearInterval(interval);
-  }, [isAuthenticated, user]);
+  }, [isAuthenticated, user, fetchDashboardData]);
 
-  const fetchDashboardData = async () => {
-    try {
-      setLoading(true);
-      console.log('=== Dashboard Data Fetch Started ===');
-      console.log('User object:', user);
-      console.log('User role:', userRole);
-      console.log('Is authenticated:', isAuthenticated);
-      
-      // Fetch different data based on user role
-      if (userRole === 'TEACHER') {
-        console.log('Fetching teacher data...');
-        await Promise.all([
-          fetchTeacherStatistics(),
-          fetchRecentActivities(),
-          fetchSystemStatus()
-        ]);
-      } else {
-        console.log('Fetching student data...');
-        await Promise.all([
-          fetchStudentStatistics(),
-          fetchStudentActivities()
-        ]);
-      }
-      
-      setError(null);
-    } catch (err) {
-      console.error('Failed to fetch dashboard data:', err);
-      setError('Failed to load dashboard data. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // ...existing code...
 
   const fetchTeacherStatistics = async () => {
     try {
-      console.log('=== Teacher Statistics Fetch ===');
       console.log('User role:', userRole);
       console.log('User object:', user);
       
@@ -148,7 +140,6 @@ const Dashboard = () => {
       console.error('Error details:', error);
       console.error('Error message:', error.message);
       console.error('Error stack:', error.stack);
-      
       // Set default values if API calls fail
       setDashboardData(prev => ({
         ...prev,
@@ -265,18 +256,23 @@ const Dashboard = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'healthy': case 'running': case 'active': return 'success';
-      case 'warning': case 'degraded': return 'warning';
-      case 'error': case 'failed': case 'inactive': return 'danger';
-      default: return 'secondary';
+      case 'healthy':
+      case 'running':
+      case 'active':
+        return 'success';
+      case 'warning':
+      case 'degraded':
+        return 'warning';
+      case 'error':
+      case 'failed':
+      case 'inactive':
+        return 'danger';
+      default:
+        return 'secondary';
     }
   };
 
-  const getResourceUsageColor = (usage) => {
-    if (usage < 50) return 'success';
-    if (usage < 80) return 'warning';
-    return 'danger';
-  };
+  // Removed unused getResourceUsageColor
 
   const StatCard = ({ title, value, icon: Icon, subtitle, color = 'primary' }) => (
     <Card className="h-100 border-0 shadow-sm">

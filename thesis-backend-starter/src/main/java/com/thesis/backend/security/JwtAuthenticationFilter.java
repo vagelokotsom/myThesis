@@ -12,9 +12,12 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.lang.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -22,26 +25,26 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final UserDetailsServiceImpl userDetailsService;
 
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
-            throws ServletException, IOException {
-        System.out.println("DEBUG: JwtAuthenticationFilter.doFilterInternal called for: " + request.getRequestURI());
-        
+    protected void doFilterInternal(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull FilterChain filterChain)
+        throws ServletException, IOException {
+        log.debug("JwtAuthenticationFilter.doFilterInternal called for: {}", request.getRequestURI());
+
         final String authHeader = request.getHeader("Authorization");
-        System.out.println("DEBUG: Authorization header: " + authHeader);
+        log.debug("Authorization header: {}", authHeader);
 
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
-            System.out.println("DEBUG: No valid Authorization header, proceeding with filter chain");
+            log.debug("No valid Authorization header, proceeding with filter chain");
             filterChain.doFilter(request, response);
             return;
         }
 
         String jwt = authHeader.substring(7);
         String username = jwtUtil.extractUsername(jwt);
-        System.out.println("DEBUG: Extracted username from JWT: " + username);
+        log.debug("Extracted username from JWT: {}", username);
 
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             if (jwtUtil.validateToken(jwt)) {
-                System.out.println("DEBUG: JWT token is valid, setting authentication");
+                log.debug("JWT token is valid, setting authentication");
                 UserDetails userDetails = userDetailsService.loadUserByUsername(username);
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                     userDetails,
@@ -50,12 +53,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 );
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
-                System.out.println("DEBUG: Authentication set successfully");
+                log.debug("Authentication set successfully");
             } else {
-                System.out.println("DEBUG: JWT token validation failed");
+                log.warn("JWT token validation failed");
+                response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+                response.getWriter().write("Invalid or expired JWT token");
+                return;
             }
         } else {
-            System.out.println("DEBUG: Username is null or authentication already exists");
+            log.debug("Username is null or authentication already exists");
         }
 
         filterChain.doFilter(request, response);

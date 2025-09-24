@@ -101,7 +101,7 @@ public class DeploymentService {
                 .build();
 
         Deployment createdDeployment = kubernetesClient.apps().deployments()
-                .inNamespace(namespace).create(deployment);
+                .inNamespace(namespace).resource(deployment).serverSideApply();
 
         return mapDeploymentToDto(createdDeployment);
     }
@@ -146,7 +146,7 @@ public class DeploymentService {
                 .build();
 
         Deployment result = kubernetesClient.apps().deployments()
-                .inNamespace(namespace).withName(name).replace(updatedDeployment);
+                .inNamespace(namespace).resource(updatedDeployment).serverSideApply();
 
         return mapDeploymentToDto(result);
     }

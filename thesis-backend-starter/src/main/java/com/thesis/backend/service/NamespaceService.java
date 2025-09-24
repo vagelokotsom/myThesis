@@ -48,7 +48,7 @@ public class NamespaceService {
                 .endMetadata()
                 .build();
 
-        Namespace createdNamespace = kubernetesClient.namespaces().create(namespace);
+    Namespace createdNamespace = kubernetesClient.namespaces().resource(namespace).serverSideApply();
         return mapNamespaceToDto(createdNamespace);
     }
 

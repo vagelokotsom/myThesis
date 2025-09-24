@@ -89,7 +89,7 @@ public class ContainerController {
      * Get containers for the authenticated user (students see only their own)
      */
     @GetMapping("/my-containers")
-    @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER')")
+    @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER', 'ADMIN')")
     public ResponseEntity<List<ContainerInstance>> getMyContainers(@AuthenticationPrincipal User user) {
         try {
             List<ContainerInstance> containers;
