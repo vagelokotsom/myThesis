@@ -2,6 +2,8 @@ package com.thesis.backend.security;
 
 import com.thesis.backend.entity.User;
 import io.jsonwebtoken.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import io.jsonwebtoken.security.Keys;
 import org.springframework.stereotype.Component;
 
@@ -10,7 +12,9 @@ import java.util.Date;
 
 @Component
 public class JwtUtil {
-    private final Key key = Keys.secretKeyFor(SignatureAlgorithm.HS256);
+    private static final Logger log = LoggerFactory.getLogger(JwtUtil.class);
+    // Use a fixed secret key so tokens remain valid across restarts
+    private final Key key = Keys.hmacShaKeyFor("MySecretJwtKeyForThesisApp123456789012345678901234567890123456789012345678".getBytes());
 
     public String generateToken(User user) {
         // 24 hours
@@ -35,6 +39,7 @@ public class JwtUtil {
                     .parseClaimsJws(token);
             return true;
         } catch (JwtException e) {
+            log.warn("JWT validation error: {}", e.getMessage());
             return false;
         }
     }

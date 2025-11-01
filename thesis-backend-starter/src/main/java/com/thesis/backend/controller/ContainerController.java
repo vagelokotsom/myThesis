@@ -36,6 +36,29 @@ public class ContainerController {
         private Long studentId;
     }
 
+    /**
+     * Allow a student to self-provision a container from an image template
+     */
+    @PostMapping
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<?> createContainerForCurrentStudent(
+            @RequestBody CreateContainerRequest request,
+            @AuthenticationPrincipal User student) {
+
+        if (request.getImageId() == null) {
+            return ResponseEntity.badRequest().body("imageId is required");
+        }
+
+        try {
+            ContainerInstance instance = containerInstanceService.createContainerForStudent(
+                    request.getImageId(), student.getId(), student);
+            return ResponseEntity.ok(instance);
+        } catch (Exception e) {
+            log.error("Failed to create container for student {}", student.getUsername(), e);
+            return ResponseEntity.badRequest().body("Failed to create container: " + e.getMessage());
+        }
+    }
+
     @PostMapping("/create/{imageId}")
     public ResponseEntity<?> create(@PathVariable Long imageId, @RequestParam String username) {
         ImageTemplate template = imageRepo.findById(imageId).orElseThrow();
@@ -199,6 +222,30 @@ public class ContainerController {
             return ResponseEntity.internalServerError().build();
         }
     }
+
+    /**
+     * Retrieve container logs
+     */
+    @GetMapping("/{id}/logs")
+    @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER', 'ADMIN')")
+    public ResponseEntity<?> getContainerLogs(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        try {
+            ContainerInstance container = containerInstanceService.findById(id);
+            if (container == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            if (!containerInstanceService.userCanAccessContainer(container, user)) {
+                return ResponseEntity.status(403).body("Access denied");
+            }
+
+            String logs = containerInstanceService.getContainerLogs(id, user);
+            return ResponseEntity.ok(Map.of("logs", logs));
+        } catch (Exception e) {
+            log.error("Failed to get logs for container {}", id, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
     
     @GetMapping("/{id}/ssh-info")
     @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN') or @containerInstanceService.canStudentAccessContainer(#id, authentication.name)")
@@ -269,6 +316,72 @@ public class ContainerController {
         } catch (Exception e) {
             log.error("Failed to get SSH info", e);
             return ResponseEntity.badRequest().body("Failed to get SSH info: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Delete a container (teachers and admins can delete any, students can delete their own)
+     */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN') or @containerInstanceService.canStudentAccessContainer(#id, authentication.name)")
+    public ResponseEntity<?> deleteContainer(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        try {
+            log.info("User {} attempting to delete container {}", user.getUsername(), id);
+            containerInstanceService.deleteContainer(id, user);
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Container deleted successfully");
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            log.error("Failed to delete container {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected error deleting container {}", id, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", "Internal server error"));
+        }
+    }
+
+    /**
+     * Stop a container (without deleting)
+     */
+    @PostMapping("/{id}/stop")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN') or @containerInstanceService.canStudentAccessContainer(#id, authentication.name)")
+    public ResponseEntity<?> stopContainer(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        try {
+            log.info("User {} attempting to stop container {}", user.getUsername(), id);
+            containerInstanceService.stopContainer(id, user);
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Container stopped successfully");
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            log.error("Failed to stop container {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected error stopping container {}", id, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", "Internal server error"));
+        }
+    }
+
+    /**
+     * Start (recreate) a container
+     */
+    @PostMapping("/{id}/start")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN') or @containerInstanceService.canStudentAccessContainer(#id, authentication.name)")
+    public ResponseEntity<?> startContainer(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        try {
+            log.info("User {} attempting to start container {}", user.getUsername(), id);
+            containerInstanceService.startContainer(id, user);
+
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Container start requested");
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            log.error("Failed to start container {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected error starting container {}", id, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", "Internal server error"));
         }
     }
 }

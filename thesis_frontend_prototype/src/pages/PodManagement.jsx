@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardTitle } from "../components/ui/card";
 // import { Input } from "../components/ui/input"; // Remove if not used
@@ -7,7 +7,7 @@ import api from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function PodManagement() {
-  const { isTeacher } = useAuth();
+  const { isTeacher, user } = useAuth();
   // const [pods, setPods] = useState([]); // Remove if not used
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,9 +15,19 @@ export default function PodManagement() {
   const [selectedTemplate, setSelectedTemplate] = useState("");
   const [showCreateContainer, setShowCreateContainer] = useState(false);
 
-  const loadData = React.useCallback(async () => {
+  useEffect(() => {
+    if (user?.token) {
+      api.setToken(user.token);
+    }
+  }, [user?.token]);
+
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
+      // Ensure API has the latest token before making requests
+      if (user?.token) {
+        api.setToken(user.token);
+      }
       
       if (isTeacher()) {
         // Teachers see all containers and can manage them
@@ -42,7 +52,7 @@ export default function PodManagement() {
     } finally {
       setLoading(false);
     }
-  }, [isTeacher]);
+  }, [isTeacher, user?.token]);
 
   useEffect(() => {
     loadData();
@@ -57,7 +67,10 @@ export default function PodManagement() {
     }
 
     try {
-      await api.createContainerFromTemplate(selectedTemplate);
+      if (user?.token) {
+        api.setToken(user.token);
+      }
+      await api.createContainerFromTemplate(Number(selectedTemplate));
       toast.success("Container created successfully");
       setShowCreateContainer(false);
       setSelectedTemplate("");
@@ -70,6 +83,7 @@ export default function PodManagement() {
 
   const handleStartContainer = async (containerId) => {
     try {
+      if (user?.token) api.setToken(user.token);
       await api.startContainer(containerId);
       toast.success("Container started");
       loadData();
@@ -81,6 +95,7 @@ export default function PodManagement() {
 
   const handleStopContainer = async (containerId) => {
     try {
+      if (user?.token) api.setToken(user.token);
       await api.stopContainer(containerId);
       toast.success("Container stopped");
       loadData();
@@ -96,6 +111,7 @@ export default function PodManagement() {
     }
 
     try {
+      if (user?.token) api.setToken(user.token);
       await api.deleteContainer(containerId);
       toast.success("Container deleted");
       loadData();

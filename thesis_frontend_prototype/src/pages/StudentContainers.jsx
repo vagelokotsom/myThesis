@@ -1,5 +1,4 @@
-import React from "react";
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { toast } from "react-hot-toast";
@@ -9,7 +8,7 @@ import { useAuth } from "../contexts/AuthContext";
 export default function StudentContainers() {
   const { user, isTeacher } = useAuth();
   const [pods, setPods] = useState([]);
-  const [refreshCountdown, setRefreshCountdown] = useState(30);
+  const [refreshCountdown, setRefreshCountdown] = useState(60);
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,18 +21,57 @@ export default function StudentContainers() {
   const [selectedPod, setSelectedPod] = useState(null);
   const [sshInfo, setSshInfo] = useState(null);
 
-  const loadData = React.useCallback(async () => {
+  const loadData = useCallback(async () => {
+    const teacherView = isTeacher();
+
     try {
       setLoading(true);
-      if (user && user.token) {
+
+      if (user?.token) {
         api.setToken(user.token);
       }
+
       const [podsResponse, templatesResponse] = await Promise.all([
-        isTeacher() ? api.getAllContainers() : api.getMyContainers(),
+        teacherView ? api.getAllContainers() : api.getMyContainers(),
         api.getImageTemplates()
       ]);
+
       setTemplates(templatesResponse || []);
-      if (!isTeacher()) {
+
+      let resolvedPods = podsResponse || [];
+
+      // Ensure we sync statuses with Kubernetes before rendering
+      if (resolvedPods.length > 0) {
+        try {
+          if (user?.token) {
+            api.setToken(user.token);
+          }
+
+          if (teacherView) {
+            await api.refreshAllContainerStatuses();
+            if (user?.token) {
+              api.setToken(user.token);
+            }
+            resolvedPods = await api.getAllContainers();
+          } else {
+            await Promise.all(
+              resolvedPods.map((pod) =>
+                api.refreshContainerStatus(pod.id).catch(() => null)
+              )
+            );
+            if (user?.token) {
+              api.setToken(user.token);
+            }
+            resolvedPods = await api.getMyContainers();
+          }
+        } catch (syncError) {
+          console.warn('Failed to refresh container statuses from Kubernetes', syncError);
+        }
+      }
+
+      setPods(resolvedPods);
+
+      if (!teacherView) {
         try {
           const sshResponse = await api.getSshConnections();
           setSshConnections(sshResponse || []);
@@ -44,9 +82,35 @@ export default function StudentContainers() {
     } catch (error) {
       toast.error("Failed to load container data");
     } finally {
+      setRefreshCountdown(60);
       setLoading(false);
     }
   }, [user, isTeacher]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setRefreshCountdown((prev) => {
+        if (prev <= 1) {
+          loadData();
+          return 60;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [loadData]);
+
+  const selectedTemplateDetails = useMemo(() => {
+    if (!selectedTemplate) {
+      return null;
+    }
+    return templates.find((template) => String(template.id) === String(selectedTemplate)) || null;
+  }, [selectedTemplate, templates]);
 
   const handleCreatePod = async () => {
     if (!selectedTemplate) {
@@ -55,11 +119,11 @@ export default function StudentContainers() {
     }
 
     try {
-  await api.createContainerFromTemplate(selectedTemplate);
-  toast.success("Pod created successfully");
-  setShowCreateModal(false);
-  setSelectedTemplate("");
-  loadData();
+      await api.createContainerFromTemplate(Number(selectedTemplate));
+      toast.success("Pod created successfully");
+      setShowCreateModal(false);
+      setSelectedTemplate("");
+      loadData();
     } catch (error) {
       console.error("Failed to create container:", error);
       toast.error("Failed to create container");
@@ -291,15 +355,15 @@ export default function StudentContainers() {
                 {selectedTemplate && (
                   <div className="mt-3 p-3 bg-gray-50 border border-gray-200 rounded">
                     <div className="font-medium text-gray-800 mb-1">
-                      {templates.find(t => t.id === selectedTemplate)?.name}
+                    {selectedTemplateDetails?.name}
                     </div>
                     <div className="text-sm text-gray-700 mb-1">
-                      <strong>Description:</strong> {templates.find(t => t.id === selectedTemplate)?.description || "No description provided."}
+                      <strong>Description:</strong> {selectedTemplateDetails?.description || "No description provided."}
                     </div>
                     {/* Example: recommended use case, if available */}
-                    {templates.find(t => t.id === selectedTemplate)?.recommendedUse && (
+                    {selectedTemplateDetails?.recommendedUse && (
                       <div className="text-xs text-blue-700">
-                        <strong>Recommended use:</strong> {templates.find(t => t.id === selectedTemplate)?.recommendedUse}
+                        <strong>Recommended use:</strong> {selectedTemplateDetails.recommendedUse}
                       </div>
                     )}
                   </div>

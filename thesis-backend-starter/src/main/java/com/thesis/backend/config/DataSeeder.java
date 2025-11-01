@@ -63,40 +63,40 @@ public class DataSeeder {
     enrollment.setStudent(student);
     enrollmentRepository.save(enrollment);
         // Seed demo image templates from Docker Hub
-        ImageTemplate ubuntuTemplate = ImageTemplate.builder()
-            .name("Ubuntu 22.04")
-            .dockerImage("ubuntu:22.04")
-            .description("Vanilla Ubuntu 22.04 LTS image from Docker Hub.")
-            .persistentStorage(false)
+        ImageTemplate ubuntuWorkspace = ImageTemplate.builder()
+            .name("Ubuntu SSH Workspace")
+            .dockerImage("thesis-ssh-container:latest")
+            .description("Ubuntu-based workspace with SSH access, common CLI tools, Python, and Node tooling preinstalled.")
+            .persistentStorage(true)
             .storageSize("1Gi")
             .build();
-        imageTemplateRepository.save(ubuntuTemplate);
+        imageTemplateRepository.save(ubuntuWorkspace);
 
-        ImageTemplate nginxTemplate = ImageTemplate.builder()
-            .name("Nginx Web Server")
-            .dockerImage("nginx:latest")
-            .description("Nginx web server image from Docker Hub.")
-            .persistentStorage(false)
+        ImageTemplate pythonWorkspace = ImageTemplate.builder()
+            .name("Python SSH Workspace")
+            .dockerImage("thesis-ssh-container:latest")
+            .description("Ubuntu SSH workspace ready for Python development; install project requirements after connecting.")
+            .persistentStorage(true)
             .storageSize("1Gi")
             .build();
-        imageTemplateRepository.save(nginxTemplate);
+        imageTemplateRepository.save(pythonWorkspace);
 
-        ImageTemplate pythonTemplate = ImageTemplate.builder()
-            .name("Python 3.11")
-            .dockerImage("python:3.11")
-            .description("Python 3.11 base image from Docker Hub.")
-            .persistentStorage(false)
+        ImageTemplate nodeWorkspace = ImageTemplate.builder()
+            .name("Node.js SSH Workspace")
+            .dockerImage("thesis-ssh-container:latest")
+            .description("Ubuntu SSH workspace prepped for Node.js; npm and npx are available once you connect.")
+            .persistentStorage(true)
             .storageSize("1Gi")
             .build();
-        imageTemplateRepository.save(pythonTemplate);
+        imageTemplateRepository.save(nodeWorkspace);
 
-        ImageTemplate nodeTemplate = ImageTemplate.builder()
-            .name("Node.js 20")
-            .dockerImage("node:20")
-            .description("Node.js 20 base image from Docker Hub.")
-            .persistentStorage(false)
+        ImageTemplate nginxWorkspace = ImageTemplate.builder()
+            .name("Nginx SSH Workspace")
+            .dockerImage("thesis-ssh-container:latest")
+            .description("Ubuntu SSH workspace suited for web server labs. Configure Nginx via SSH.")
+            .persistentStorage(true)
             .storageSize("1Gi")
             .build();
-        imageTemplateRepository.save(nodeTemplate);
+        imageTemplateRepository.save(nginxWorkspace);
     }
 }

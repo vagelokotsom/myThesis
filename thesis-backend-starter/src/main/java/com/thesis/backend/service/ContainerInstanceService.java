@@ -93,56 +93,57 @@ public class ContainerInstanceService {
     /**
      * Create a container instance from an image template for a student (by IDs)
      */
-    public ContainerInstance createContainerForStudent(Long imageId, Long studentId, User teacher) {
-    // Find the student
-    User student = userRepository.findById(studentId)
-        .orElseThrow(() -> new RuntimeException("Student not found"));
+    public ContainerInstance createContainerForStudent(Long imageId, Long studentId, User actor) {
+        // Find the student
+        User student = userRepository.findById(studentId)
+            .orElseThrow(() -> new RuntimeException("Student not found"));
 
-    // Verify the user is actually a student
-    if (!"ROLE_STUDENT".equals(student.getRole())) {
-        throw new RuntimeException("User is not a student");
-    }
+        // Verify the user is actually a student
+        if (!"ROLE_STUDENT".equals(student.getRole())) {
+            throw new RuntimeException("User is not a student");
+        }
 
-    // Find the image template
-    ImageTemplate imageTemplate = imageTemplateRepository.findById(imageId)
-        .orElseThrow(() -> new RuntimeException("Image template not found with id: " + imageId));
+        // Find the image template
+        ImageTemplate imageTemplate = imageTemplateRepository.findById(imageId)
+            .orElseThrow(() -> new RuntimeException("Image template not found with id: " + imageId));
 
-    // Generate unique name for the container
-    String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-    String containerName = String.format("container-%s-%s",
-        student.getUsername().toLowerCase(),
-        timestamp);
+        // Generate unique name for the container
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String containerName = String.format("container-%s-%s",
+            student.getUsername().toLowerCase(),
+            timestamp);
 
-    // Unified pod creation logic
-    String podName = createUnifiedKubernetesPod(
-        containerName,
-        imageTemplate.getDockerImage(),
-        student,
-        imageTemplate.getResourceLimits(),
-        imageTemplate.getEnvironmentVars(),
-        imageTemplate.getPersistentStorage(),
-        imageTemplate.getStorageSize(),
-        true // SSH enabled for image templates
-    );
+        // Unified pod creation logic
+        String podName = createUnifiedKubernetesPod(
+            containerName,
+            imageTemplate.getDockerImage(),
+            student,
+            imageTemplate.getResourceLimits(),
+            imageTemplate.getEnvironmentVars(),
+            imageTemplate.getPersistentStorage(),
+            imageTemplate.getStorageSize(),
+            true // SSH enabled for image templates
+        );
 
-    // Create container instance record
-    ContainerInstance instance = ContainerInstance.builder()
-        .name(containerName)
-        .status("Creating")
-        .kubernetesPodName(podName)
-        .owner(student)
-        .imageTemplate(imageTemplate)
-        .build();
+        // Create container instance record
+        ContainerInstance instance = ContainerInstance.builder()
+            .name(containerName)
+            .status("Creating")
+            .kubernetesPodName(podName)
+            .owner(student)
+            .imageTemplate(imageTemplate)
+            .build();
 
-    ContainerInstance savedInstance = containerInstanceRepository.save(instance);
+        ContainerInstance savedInstance = containerInstanceRepository.save(instance);
 
-    // Update status after pod creation
-    updateContainerStatus(savedInstance);
+        // Update status after pod creation
+        updateContainerStatus(savedInstance);
 
-    log.info("Created container instance {} for student {} using image template {} by teacher {}",
-        containerName, student.getUsername(), imageTemplate.getName(), teacher.getUsername());
+        String actorName = actor != null ? actor.getUsername() : "system";
+        log.info("Created container instance {} for student {} using image template {} by {}",
+            containerName, student.getUsername(), imageTemplate.getName(), actorName);
 
-    return savedInstance;
+        return savedInstance;
     }
 
     // Deprecated: use unified pod creation logic
@@ -167,9 +168,11 @@ public class ContainerInstanceService {
         labels.put("ssh-enabled", sshEnabled != null && sshEnabled ? "true" : "false");
 
         // Build container
+        String resolvedImage = (dockerImage != null && !dockerImage.isBlank()) ? dockerImage : sshImageName;
+
         ContainerBuilder containerBuilder = new ContainerBuilder()
             .withName("main-container")
-            .withImage(sshImageName)
+            .withImage(resolvedImage)
             .withImagePullPolicy("IfNotPresent");
 
         if (sshEnabled != null && sshEnabled) {
@@ -331,12 +334,48 @@ public class ContainerInstanceService {
             throw new RuntimeException("Access denied");
         }
         
-        // For now, we'll recreate the pod since Kubernetes doesn't support start/stop
-        // In a production environment, you might want to use deployments instead
+        // Only recreate Kubernetes resources for containers created from image templates for now
+        ImageTemplate template = instance.getImageTemplate();
+        if (template == null) {
+            throw new RuntimeException("Restart is currently supported only for image-template based containers. Please recreate the container from its template.");
+        }
+
+        String containerName = instance.getKubernetesPodName();
+        if (containerName == null || containerName.isBlank()) {
+            containerName = instance.getName();
+            instance.setKubernetesPodName(containerName);
+        }
+
+        // Clean up any lingering Kubernetes resources just to be safe
+        try {
+            kubernetesClient.pods().inNamespace(namespace).withName(containerName).delete();
+        } catch (Exception e) {
+            log.debug("Unable to delete existing pod {} during restart: {}", containerName, e.getMessage());
+        }
+        try {
+            kubernetesClient.services().inNamespace(namespace).withName(containerName + "-ssh").delete();
+        } catch (Exception e) {
+            log.debug("Unable to delete existing service {}-ssh during restart: {}", containerName, e.getMessage());
+        }
+
         instance.setStatus("Starting");
         containerInstanceRepository.save(instance);
-        
-        log.info("Started container {} by user {}", instance.getName(), user.getUsername());
+
+        createUnifiedKubernetesPod(
+                containerName,
+                template.getDockerImage(),
+                instance.getOwner(),
+                template.getResourceLimits(),
+                template.getEnvironmentVars(),
+                template.getPersistentStorage(),
+                template.getStorageSize(),
+                true
+        );
+
+        // Update status asynchronously based on the real pod state
+        updateContainerStatus(instance);
+
+        log.info("Restarted container {} for user {}", instance.getName(), user.getUsername());
     }
     
     /**
@@ -488,9 +527,16 @@ public class ContainerInstanceService {
      * Create PVC for persistent storage
      */
     private void createPersistentVolumeClaim(String name, String size) {
+        String pvcName = name + "-pvc";
+
+        if (kubernetesClient.persistentVolumeClaims().inNamespace(namespace).withName(pvcName).get() != null) {
+            log.debug("PVC {} already exists, reusing", pvcName);
+            return;
+        }
+
         PersistentVolumeClaim pvc = new PersistentVolumeClaimBuilder()
                 .withNewMetadata()
-                    .withName(name + "-pvc")
+                    .withName(pvcName)
                     .withNamespace(namespace)
                 .endMetadata()
                 .withNewSpec()
@@ -500,7 +546,7 @@ public class ContainerInstanceService {
                     .endResources()
                 .endSpec()
                 .build();
-        
+
         kubernetesClient.persistentVolumeClaims().inNamespace(namespace).resource(pvc).create();
     }
     
@@ -639,7 +685,7 @@ public class ContainerInstanceService {
         log.info("Using localhost as fallback IP");
         return "localhost";
     }
-    
+
     /**
      * Check if a student can access a specific container by username
      */
@@ -658,7 +704,14 @@ public class ContainerInstanceService {
             return false;
         }
     }
-    
+
+    /**
+     * Public helper to reuse access checks across controllers
+     */
+    public boolean userCanAccessContainer(ContainerInstance instance, User user) {
+        return canAccessContainer(instance, user);
+    }
+
     /**
      * Find a container instance by ID
      */
