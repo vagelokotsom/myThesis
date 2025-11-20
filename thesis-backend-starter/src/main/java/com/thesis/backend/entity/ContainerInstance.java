@@ -21,6 +21,9 @@ public class ContainerInstance {
 
     @ManyToOne
     private ImageTemplate imageTemplate;
+
+    @ManyToOne
+    private ContainerTemplate containerTemplate;
     
     @PrePersist
     protected void onCreate() {

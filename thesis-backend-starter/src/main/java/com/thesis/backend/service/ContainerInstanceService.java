@@ -1,6 +1,8 @@
 
 package com.thesis.backend.service;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.thesis.backend.entity.ContainerInstance;
 import com.thesis.backend.entity.ContainerTemplate;
 import com.thesis.backend.entity.ImageTemplate;
@@ -40,6 +42,7 @@ public class ContainerInstanceService {
     private final ImageTemplateRepository imageTemplateRepository;
     private final UserRepository userRepository;
     private final KubernetesClient kubernetesClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
     
     @Value("${ssh.container.namespace:default}")
     private String namespace;
@@ -50,44 +53,25 @@ public class ContainerInstanceService {
     @Value("${ssh.container.password.student:student123}")
     private String studentSshPassword;
 
-    @Value("${ssh.container.password.root:rootpass123}")
-    private String rootSshPassword;
-    
     /**
-     * Create a container instance from a template for a student
+     * Create a container instance from a template for a specific student entity
      */
     public ContainerInstance createContainerFromTemplate(Long templateId, User student, User teacher) {
-        ContainerTemplate template = containerTemplateRepository.findById(templateId)
-                .orElseThrow(() -> new RuntimeException("Container template not found"));
-        
-        // Generate unique name for the container
-        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        String containerName = String.format("%s-%s-%s", 
-                template.getName().toLowerCase().replaceAll("[^a-z0-9]", "-"),
-                student.getUsername().toLowerCase(),
-                timestamp);
-        
-        // Create Kubernetes pod from template
-        String podName = createKubernetesPod(template, containerName, student);
-        
-        // Create container instance record
-        ContainerInstance instance = ContainerInstance.builder()
-                .name(containerName)
-                .status("Creating")
-                .kubernetesPodName(podName)
-                .owner(student)
-                .imageTemplate(null) // We'll set this based on template if needed
-                .build();
-        
-        ContainerInstance savedInstance = containerInstanceRepository.save(instance);
-        
-        // Update status after pod is created
-        updateContainerStatus(savedInstance);
-        
-        log.info("Created container instance {} for student {} from template {}", 
-                containerName, student.getUsername(), template.getName());
-        
-        return savedInstance;
+        return createContainerFromTemplateInternal(templateId, student, teacher);
+    }
+
+    /**
+     * Create a container instance from a template for a student by ID (teacher/admin flow)
+     */
+    public ContainerInstance createContainerFromTemplate(Long templateId, Long studentId, User actor) {
+        User student = userRepository.findById(studentId)
+                .orElseThrow(() -> new RuntimeException("Student not found"));
+
+        if (!"ROLE_STUDENT".equals(student.getRole())) {
+            throw new RuntimeException("User is not a student");
+        }
+
+        return createContainerFromTemplateInternal(templateId, student, actor);
     }
     
     /**
@@ -146,8 +130,99 @@ public class ContainerInstanceService {
         return savedInstance;
     }
 
-    // Deprecated: use unified pod creation logic
-    // private ContainerInstance createSimpleContainerForStudent(Long imageId, User student, User teacher) { ... }
+    /**
+     * Shared logic for container template provisioning
+     */
+    private ContainerInstance createContainerFromTemplateInternal(Long templateId, User student, User actor) {
+        ContainerTemplate template = containerTemplateRepository.findById(templateId)
+                .orElseThrow(() -> new RuntimeException("Container template not found with id: " + templateId));
+
+        String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String templateSlug = template.getName() != null
+                ? template.getName().toLowerCase().replaceAll("[^a-z0-9]", "-")
+                : "template";
+        String containerName = String.format("%s-%s-%s",
+                templateSlug,
+                student.getUsername().toLowerCase(),
+                timestamp);
+
+        Map<String, String> resourceLimits = parseResourceLimits(template.getResourceLimits());
+        Map<String, String> environmentVars = parseEnvironmentVariables(template.getEnvironmentVars());
+        boolean persistentStorage = Boolean.TRUE.equals(template.getPersistentStorage());
+        String storageSize = template.getStorageSize();
+        Boolean sshEnabled = template.getSshEnabled() != null ? template.getSshEnabled() : Boolean.TRUE;
+
+        String podName = createUnifiedKubernetesPod(
+                containerName,
+                template.getDockerImage(),
+                student,
+                resourceLimits,
+                environmentVars,
+                persistentStorage,
+                storageSize,
+                sshEnabled
+        );
+
+        ContainerInstance instance = ContainerInstance.builder()
+                .name(containerName)
+                .status("Creating")
+                .kubernetesPodName(podName)
+                .owner(student)
+                .imageTemplate(null)
+                .containerTemplate(template)
+                .build();
+
+        ContainerInstance savedInstance = containerInstanceRepository.save(instance);
+
+        updateContainerStatus(savedInstance);
+
+        String actorName = actor != null ? actor.getUsername() : "system";
+        log.info("Created container instance {} for student {} using container template {} by {}",
+                containerName, student.getUsername(), template.getName(), actorName);
+
+        return savedInstance;
+    }
+
+    private Map<String, String> parseResourceLimits(String raw) {
+        Map<String, String> parsed = parseJsonStringToMap(raw, "resource limits");
+        return parsed != null ? parsed : new HashMap<>();
+    }
+
+    private Map<String, String> parseEnvironmentVariables(String raw) {
+        Map<String, String> parsed = parseJsonStringToMap(raw, "environment variables");
+        if (parsed != null) {
+            return parsed;
+        }
+
+        Map<String, String> fallback = new HashMap<>();
+        if (raw == null || raw.isBlank()) {
+            return fallback;
+        }
+
+        String[] lines = raw.split("\\r?\\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.isEmpty() || !trimmed.contains("=")) {
+                continue;
+            }
+            String[] parts = trimmed.split("=", 2);
+            fallback.put(parts[0].trim(), parts.length > 1 ? parts[1].trim() : "");
+        }
+        return fallback;
+    }
+
+    private Map<String, String> parseJsonStringToMap(String raw, String context) {
+        if (raw == null || raw.isBlank()) {
+            return new HashMap<>();
+        }
+        try {
+            return objectMapper.readValue(raw, new TypeReference<Map<String, String>>() {});
+        } catch (Exception e) {
+            log.warn("Failed to parse {} JSON: {}", context, e.getMessage());
+            return null;
+        }
+    }
+
     /**
      * Unified pod creation logic for both ImageTemplate and ContainerTemplate
      */
@@ -429,100 +504,6 @@ public class ContainerInstanceService {
         }
     }
     
-    /**
-     * Create Kubernetes pod from template
-     */
-    private String createKubernetesPod(ContainerTemplate template, String containerName, User student) {
-        Map<String, String> labels = new HashMap<>();
-        labels.put("app", containerName);
-        labels.put("owner", student.getUsername());
-        labels.put("type", "student-container");
-        labels.put("ssh-enabled", template.getSshEnabled().toString());
-        
-        // Start building container
-        ContainerBuilder containerBuilder = new ContainerBuilder()
-                .withName("main-container");
-        
-        // Set image based on SSH requirements
-        if (template.getSshEnabled()) {
-        containerBuilder = containerBuilder
-            .withImage(sshImageName)
-                    .addNewPort()
-                        .withContainerPort(22)
-                        .withProtocol("TCP")
-                    .endPort()
-                    .addNewEnv()
-                        .withName("ROOT_PASSWORD")
-                        .withValue(rootSshPassword)
-                    .endEnv();
-        } else {
-            containerBuilder = containerBuilder.withImage(template.getDockerImage());
-        }
-        
-        // Add environment variables from template
-        if (template.getEnvironmentVars() != null && !template.getEnvironmentVars().isEmpty()) {
-            containerBuilder = containerBuilder
-                    .addNewEnv()
-                        .withName("WORKSPACE_USER")
-                        .withValue(student.getUsername())
-                    .endEnv();
-        }
-        
-        // Add resource limits if specified
-        if (template.getResourceLimits() != null && !template.getResourceLimits().isEmpty()) {
-            containerBuilder = containerBuilder
-                    .withNewResources()
-                        .addToRequests("memory", new Quantity("256Mi"))
-                        .addToRequests("cpu", new Quantity("100m"))
-                        .addToLimits("memory", new Quantity("512Mi"))
-                        .addToLimits("cpu", new Quantity("500m"))
-                    .endResources();
-        }
-        
-        // Add persistent volume mount if required
-        if (template.getPersistentStorage()) {
-            containerBuilder = containerBuilder
-                    .addNewVolumeMount()
-                        .withName("workspace-storage")
-                        .withMountPath("/workspace")
-                    .endVolumeMount();
-        }
-        
-        // Build the pod spec
-        PodSpecBuilder podSpecBuilder = new PodSpecBuilder()
-                .addToContainers(containerBuilder.build());
-        
-        // Add persistent volume if required
-        if (template.getPersistentStorage()) {
-            podSpecBuilder = podSpecBuilder
-                .addNewVolume()
-                    .withName("workspace-storage")
-                    .withNewPersistentVolumeClaim()
-                        .withClaimName(containerName + "-pvc")
-                    .endPersistentVolumeClaim()
-                .endVolume();
-        }
-        
-        // Build the complete pod
-        Pod pod = new PodBuilder()
-                .withNewMetadata()
-                    .withName(containerName)
-                    .withNamespace(namespace)
-                    .withLabels(labels)
-                .endMetadata()
-                .withSpec(podSpecBuilder.build())
-                .build();
-        
-        // Create PVC if persistent storage is required
-        if (template.getPersistentStorage()) {
-            createPersistentVolumeClaim(containerName, template.getStorageSize());
-        }
-        
-        // Create the pod
-        kubernetesClient.pods().inNamespace(namespace).resource(pod).create();        
-        return containerName;
-    }
-
     /**
      * Create PVC for persistent storage
      */

@@ -226,18 +226,26 @@ class ApiService {
     return await this.request('/containers');
   }
 
-  async createContainerForStudent(imageId, studentId) {
-    console.log('=== API createContainerForStudent Debug ===');
-    console.log('imageId:', imageId, 'type:', typeof imageId);
-    console.log('studentId:', studentId, 'type:', typeof studentId);
-    
-    const body = { imageId, studentId };
-    console.log('Request body:', body);
-    
-    return await this.request('/containers/create-for-student', {
+  async createContainerInstance({ imageId = null, containerTemplateId = null, studentId = null } = {}) {
+    if (!imageId && !containerTemplateId) {
+      throw new Error('imageId or containerTemplateId is required');
+    }
+
+    const body = {};
+    if (imageId) body.imageId = imageId;
+    if (containerTemplateId) body.containerTemplateId = containerTemplateId;
+    if (studentId) body.studentId = studentId;
+
+    const endpoint = studentId ? '/containers/create-for-student' : '/containers';
+
+    return await this.request(endpoint, {
       method: 'POST',
       body: JSON.stringify(body)
     });
+  }
+
+  async createContainerForStudent(templateId, studentId) {
+    return await this.createContainerInstance({ imageId: templateId, studentId });
   }
 
   async startContainer(id) {
@@ -403,20 +411,7 @@ class ApiService {
 
   // Enhanced Container Instance Management
   async createContainerFromTemplate(imageId, studentId = null) {
-    const body = { imageId };
-
-    if (studentId) {
-      body.studentId = studentId;
-      return await this.request('/containers/create-for-student', {
-        method: 'POST',
-        body: JSON.stringify(body)
-      });
-    }
-
-    return await this.request('/containers', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    });
+    return await this.createContainerInstance({ imageId, studentId });
   }
 
   async getContainerStatus(id) {

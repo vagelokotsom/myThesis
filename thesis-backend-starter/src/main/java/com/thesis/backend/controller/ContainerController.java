@@ -32,7 +32,8 @@ public class ContainerController {
 
     @Data
     public static class CreateContainerRequest {
-        private Long imageId;  // Changed from templateId to imageId
+        private Long imageId;
+        private Long containerTemplateId;
         private Long studentId;
     }
 
@@ -45,13 +46,25 @@ public class ContainerController {
             @RequestBody CreateContainerRequest request,
             @AuthenticationPrincipal User student) {
 
-        if (request.getImageId() == null) {
-            return ResponseEntity.badRequest().body("imageId is required");
-        }
-
         try {
-            ContainerInstance instance = containerInstanceService.createContainerForStudent(
-                    request.getImageId(), student.getId(), student);
+            boolean hasImage = request.getImageId() != null;
+            boolean hasTemplate = request.getContainerTemplateId() != null;
+
+            if (!hasImage && !hasTemplate) {
+                return ResponseEntity.badRequest().body("imageId or containerTemplateId is required");
+            }
+            if (hasImage && hasTemplate) {
+                return ResponseEntity.badRequest().body("Provide either imageId or containerTemplateId, not both");
+            }
+
+            ContainerInstance instance;
+            if (hasTemplate) {
+                instance = containerInstanceService.createContainerFromTemplate(
+                        request.getContainerTemplateId(), student.getId(), student);
+            } else {
+                instance = containerInstanceService.createContainerForStudent(
+                        request.getImageId(), student.getId(), student);
+            }
             return ResponseEntity.ok(instance);
         } catch (Exception e) {
             log.error("Failed to create container for student {}", student.getUsername(), e);
@@ -80,11 +93,31 @@ public class ContainerController {
             @RequestBody CreateContainerRequest request,
             @AuthenticationPrincipal User teacher) {
         try {
-            log.info("Teacher {} creating container for student {} using image {}", 
-                    teacher.getUsername(), request.getStudentId(), request.getImageId());
+            if (request.getStudentId() == null) {
+                return ResponseEntity.badRequest().body("studentId is required");
+            }
+
+            boolean hasImage = request.getImageId() != null;
+            boolean hasTemplate = request.getContainerTemplateId() != null;
+
+            if (!hasImage && !hasTemplate) {
+                return ResponseEntity.badRequest().body("imageId or containerTemplateId is required");
+            }
+            if (hasImage && hasTemplate) {
+                return ResponseEntity.badRequest().body("Provide either imageId or containerTemplateId, not both");
+            }
+
+            log.info("Teacher {} creating container for student {} using {} {}", 
+                    teacher.getUsername(),
+                    request.getStudentId(),
+                    hasTemplate ? "containerTemplateId" : "imageId",
+                    hasTemplate ? request.getContainerTemplateId() : request.getImageId());
             
-            ContainerInstance instance = containerInstanceService.createContainerForStudent(
-                    request.getImageId(), request.getStudentId(), teacher);
+            ContainerInstance instance = hasTemplate
+                    ? containerInstanceService.createContainerFromTemplate(
+                            request.getContainerTemplateId(), request.getStudentId(), teacher)
+                    : containerInstanceService.createContainerForStudent(
+                            request.getImageId(), request.getStudentId(), teacher);
             
             return ResponseEntity.ok(instance);
         } catch (Exception e) {

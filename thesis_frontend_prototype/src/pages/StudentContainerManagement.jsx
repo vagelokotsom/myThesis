@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
 import { toast } from 'react-hot-toast';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
@@ -9,7 +8,10 @@ import api from '../services/api';
 export default function StudentContainerManagement() {
   const { user, isTeacher } = useAuth();
   const [students, setStudents] = useState([]);
-  const [templates, setTemplates] = useState([]);
+  const [templateOptions, setTemplateOptions] = useState({
+    containerTemplates: [],
+    imageTemplates: []
+  });
   const [containers, setContainers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -17,9 +19,11 @@ export default function StudentContainerManagement() {
   const [selectedContainer, setSelectedContainer] = useState(null);
   const [sshInfo, setSshInfo] = useState(null);
   const [selectedStudent, setSelectedStudent] = useState('');
-  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState('');
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+
+  const totalTemplateCount = templateOptions.containerTemplates.length + templateOptions.imageTemplates.length;
 
   useEffect(() => {
     if (!isTeacher()) {
@@ -54,22 +58,28 @@ export default function StudentContainerManagement() {
         api.setToken(user.token);
       }
       
-      const [studentsData, templatesData, containersData] = await Promise.all([
+      const [studentsData, containerTemplatesData, imageTemplatesData, containersData] = await Promise.all([
         api.getAllStudents(),
-        api.getImageTemplates(), // Use ImageTemplates instead of ContainerTemplates
+        api.getContainerTemplates(),
+        api.getImageTemplates(),
         api.getAllContainers()
       ]);
       
       console.log('Raw students response:', studentsData);
-      console.log('Raw templates response:', templatesData);
+      console.log('Raw container templates response:', containerTemplatesData);
+      console.log('Raw image templates response:', imageTemplatesData);
       console.log('Raw containers response:', containersData);
       
       setStudents(studentsData || []);
-      setTemplates(templatesData || []);
+      setTemplateOptions({
+        containerTemplates: containerTemplatesData || [],
+        imageTemplates: imageTemplatesData || []
+      });
       setContainers(containersData || []);
       
       console.log('Final state - students:', studentsData?.length || 0);
-      console.log('Final state - templates:', templatesData?.length || 0);
+      console.log('Final state - container templates:', containerTemplatesData?.length || 0);
+      console.log('Final state - image templates:', imageTemplatesData?.length || 0);
       console.log('Final state - containers:', containersData?.length || 0);
     } catch (error) {
       console.error('Failed to load data:', error);
@@ -117,39 +127,47 @@ export default function StudentContainerManagement() {
   };
 
   const handleCreateContainer = async () => {
-    if (!selectedStudent || !selectedTemplate) {
+    if (!selectedStudent || !selectedTemplateKey) {
       toast.error('Please select both a student and a template');
+      return;
+    }
+
+    const [templateType, templateIdRaw] = selectedTemplateKey.split(':');
+    const parsedTemplateId = parseInt(templateIdRaw, 10);
+    if (!templateType || Number.isNaN(parsedTemplateId)) {
+      toast.error('Invalid template selection');
       return;
     }
 
     console.log('=== Create Container Debug ===');
     console.log('selectedStudent (raw):', selectedStudent);
-    console.log('selectedTemplate (raw):', selectedTemplate);
-    console.log('selectedStudent (parsed):', parseInt(selectedStudent));
-    console.log('selectedTemplate (parsed):', parseInt(selectedTemplate));
+    console.log('selectedTemplateKey (raw):', selectedTemplateKey);
+    console.log('templateType:', templateType, 'templateId:', parsedTemplateId);
 
     try {
       setCreating(true);
       
-      // Ensure API has the current token
-      if (user && user.token) {
+      if (user?.token) {
         console.log('Setting API token for container creation:', user.token.substring(0, 20) + '...');
         api.setToken(user.token);
-      } else {
-        console.log('No user or token available for container creation:', { user: !!user, token: !!user?.token });
       }
       
-      const imageId = parseInt(selectedTemplate);
-      const studentId = parseInt(selectedStudent);
+      const studentId = parseInt(selectedStudent, 10);
+      const payload = { studentId };
+      if (templateType === 'container') {
+        payload.containerTemplateId = parsedTemplateId;
+      } else {
+        payload.imageId = parsedTemplateId;
+      }
       
-      console.log('Calling API with imageId:', imageId, 'studentId:', studentId);
+      console.log('Calling API with payload:', payload);
       
-      await api.createContainerForStudent(imageId, studentId);
+      await api.createContainerInstance(payload);
       toast.success('Container created successfully!');
       setShowCreateModal(false);
       setSelectedStudent('');
-      setSelectedTemplate('');
-      await loadData(); // Reload containers
+      setSelectedTemplateKey('');
+      await loadData();
     } catch (error) {
       console.error('Failed to create container:', error);
       toast.error('Failed to create container: ' + error.message);
@@ -162,14 +180,14 @@ export default function StudentContainerManagement() {
     return containers.filter(container => container.owner?.id === studentId);
   };
 
-  const getStudentName = (studentId) => {
-    const student = students.find(s => s.id === studentId);
-    return student ? student.username : 'Unknown';
-  };
-
-  const getTemplateName = (templateId) => {
-    const template = templates.find(t => t.id === templateId);
-    return template ? template.name : 'Unknown';
+  const getTemplateLabel = (container) => {
+    if (container?.containerTemplate) {
+      return container.containerTemplate.name || container.containerTemplate.dockerImage || 'Custom Template';
+    }
+    if (container?.imageTemplate) {
+      return container.imageTemplate.name || container.imageTemplate.dockerImage || 'Base Image';
+    }
+    return 'Unknown';
   };
 
   const handleShowSshInfo = async (container) => {
@@ -282,16 +300,29 @@ export default function StudentContainerManagement() {
               <div>
                 <label className="block text-sm font-medium mb-1">Select Template</label>
                 <select
-                  value={selectedTemplate}
-                  onChange={(e) => setSelectedTemplate(e.target.value)}
+                  value={selectedTemplateKey}
+                  onChange={(e) => setSelectedTemplateKey(e.target.value)}
                   className="w-full p-2 border rounded-md"
                 >
                   <option value="">Choose a template...</option>
-                  {templates.map(template => (
-                    <option key={template.id} value={template.id}>
-                      {template.name} - {template.dockerImage}
-                    </option>
-                  ))}
+                  {templateOptions.containerTemplates.length > 0 && (
+                    <optgroup label="My Container Templates">
+                      {templateOptions.containerTemplates.map((template) => (
+                        <option key={`container-${template.id}`} value={`container:${template.id}`}>
+                          {template.name} {template.dockerImage ? `- ${template.dockerImage}` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {templateOptions.imageTemplates.length > 0 && (
+                    <optgroup label="Base Images">
+                      {templateOptions.imageTemplates.map((template) => (
+                        <option key={`image-${template.id}`} value={`image:${template.id}`}>
+                          {template.name} - {template.dockerImage}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
               </div>
             </div>
@@ -359,7 +390,7 @@ export default function StudentContainerManagement() {
                         <div>
                           <div className="font-medium">{container.name}</div>
                           <div className="text-sm text-gray-600">
-                            Template: {getTemplateName(container.imageTemplate?.id)}
+                            Template: {getTemplateLabel(container)}
                           </div>
                           <div className="text-sm text-gray-600 flex items-center">
                             Status: 
@@ -435,7 +466,7 @@ export default function StudentContainerManagement() {
               <div className="text-sm text-gray-600">Total Containers</div>
             </div>
             <div className="text-center">
-              <div className="text-2xl font-bold text-purple-600">{templates.length}</div>
+              <div className="text-2xl font-bold text-purple-600">{totalTemplateCount}</div>
               <div className="text-sm text-gray-600">Available Templates</div>
             </div>
           </div>
