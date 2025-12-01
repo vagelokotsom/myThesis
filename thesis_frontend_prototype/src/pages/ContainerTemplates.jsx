@@ -4,8 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input";
 import { toast } from "react-hot-toast";
 import api from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function ContainerTemplates() {
+  const { user } = useAuth();
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -20,22 +22,24 @@ export default function ContainerTemplates() {
     memoryLimit: "",
     cpuRequest: "",
     memoryRequest: "",
-    sshEnabled: false,
+    sshEnabled: true,
     persistentStorage: false,
-    storageSize: "",
+    storageSize: "1Gi",
     shared: true,
     environmentVars: "",
-    command: "",
-    args: ""
+    command: ""
   });
 
   useEffect(() => {
     loadTemplates();
-  }, []);
+  }, [user]);
 
   const loadTemplates = async () => {
     try {
       setLoading(true);
+      if (user?.token) {
+        api.setToken(user.token);
+      }
       const response = await api.getMyTemplates();
       setTemplates(response);
     } catch (error) {
@@ -63,13 +67,12 @@ export default function ContainerTemplates() {
       memoryLimit: "",
       cpuRequest: "",
       memoryRequest: "",
-      sshEnabled: false,
+      sshEnabled: true,
       persistentStorage: false,
-      storageSize: "",
+      storageSize: "1Gi",
       shared: true,
       environmentVars: "",
-      command: "",
-      args: ""
+      command: ""
     });
     setEditingTemplate(null);
     setShowCreateForm(false);
@@ -84,20 +87,49 @@ export default function ContainerTemplates() {
     }
 
     try {
-      // Convert environment vars from string to array
-      const envVars = formData.environmentVars 
-        ? formData.environmentVars.split('\n').filter(line => line.trim())
-        : [];
-      
-      // Convert args from string to array  
-      const argsArray = formData.args
-        ? formData.args.split('\n').filter(line => line.trim())
-        : [];
+      const envMap = {};
+      if (formData.environmentVars) {
+        formData.environmentVars
+          .split('\n')
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .forEach((line) => {
+            const [key, ...rest] = line.split('=');
+            if (key) {
+              envMap[key.trim()] = rest.join('=').trim();
+            }
+          });
+      }
+
+      const resourceLimits = {};
+      if (formData.cpuLimit) {
+        resourceLimits['cpu-limit'] = formData.cpuLimit.trim();
+      }
+      if (formData.cpuRequest) {
+        resourceLimits['cpu-request'] = formData.cpuRequest.trim();
+      }
+      if (formData.memoryLimit) {
+        resourceLimits['memory-limit'] = formData.memoryLimit.trim();
+      }
+      if (formData.memoryRequest) {
+        resourceLimits['memory-request'] = formData.memoryRequest.trim();
+      }
 
       const templateData = {
-        ...formData,
-        environmentVars: envVars,
-        args: argsArray
+        name: formData.name,
+        description: formData.description,
+        dockerImage: formData.dockerImage,
+        category: formData.category || null,
+        defaultCommand: formData.command || null,
+        sshEnabled: formData.sshEnabled,
+        persistentStorage: formData.persistentStorage,
+        storageSize: formData.persistentStorage ? (formData.storageSize || '1Gi') : null,
+        isPublic: formData.shared,
+        environmentVars: Object.keys(envMap).length ? JSON.stringify(envMap) : null,
+        resourceLimits: Object.keys(resourceLimits).length ? JSON.stringify(resourceLimits) : null,
+        exposedPorts: null,
+        preInstalledTools: null,
+        difficultyLevel: null
       };
 
       if (editingTemplate) {
@@ -117,22 +149,49 @@ export default function ContainerTemplates() {
   };
 
   const handleEdit = (template) => {
+    let envText = "";
+    if (template.environmentVars) {
+      try {
+        const parsed = JSON.parse(template.environmentVars);
+        envText = Object.entries(parsed)
+          .map(([key, value]) => `${key}=${value}`)
+          .join('\n');
+      } catch (error) {
+        envText = template.environmentVars;
+      }
+    }
+
+    let cpuLimit = "";
+    let cpuRequest = "";
+    let memoryLimit = "";
+    let memoryRequest = "";
+    if (template.resourceLimits) {
+      try {
+        const parsed = JSON.parse(template.resourceLimits);
+        cpuLimit = parsed['cpu-limit'] || "";
+        cpuRequest = parsed['cpu-request'] || "";
+        memoryLimit = parsed['memory-limit'] || "";
+        memoryRequest = parsed['memory-request'] || "";
+      } catch (error) {
+        // ignore parsing error and leave fields blank
+      }
+    }
+
     setFormData({
       name: template.name || "",
       description: template.description || "",
       dockerImage: template.dockerImage || "",
       category: template.category || "",
-      cpuLimit: template.cpuLimit || "",
-      memoryLimit: template.memoryLimit || "",
-      cpuRequest: template.cpuRequest || "",
-      memoryRequest: template.memoryRequest || "",
-      sshEnabled: template.sshEnabled || false,
-      persistentStorage: template.persistentStorage || false,
-      storageSize: template.storageSize || "",
-      shared: template.shared !== false,
-      environmentVars: Array.isArray(template.environmentVars) ? template.environmentVars.join('\n') : "",
-      command: template.command || "",
-      args: Array.isArray(template.args) ? template.args.join('\n') : ""
+      cpuLimit,
+      memoryLimit,
+      cpuRequest,
+      memoryRequest,
+      sshEnabled: Boolean(template.sshEnabled),
+      persistentStorage: Boolean(template.persistentStorage),
+      storageSize: template.storageSize || (template.persistentStorage ? "1Gi" : ""),
+      shared: template.isPublic !== false,
+      environmentVars: envText,
+      command: template.defaultCommand || ""
     });
     setEditingTemplate(template);
     setShowCreateForm(true);
@@ -231,14 +290,15 @@ export default function ContainerTemplates() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1">Command</label>
-                  <Input
-                    value={formData.command}
-                    onChange={(e) => handleInputChange("command", e.target.value)}
-                    placeholder="e.g., /bin/bash"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Command</label>
+                <Input
+                  value={formData.command}
+                  onChange={(e) => handleInputChange("command", e.target.value)}
+                  placeholder="e.g., /bin/bash or leave blank"
+                />
+                <p className="text-xs text-gray-500 mt-1">If blank on base images, we keep the container alive for you.</p>
+              </div>
               </div>
 
               <div>
@@ -298,6 +358,7 @@ export default function ContainerTemplates() {
                     onChange={(e) => handleInputChange("sshEnabled", e.target.checked)}
                   />
                   <label htmlFor="sshEnabled" className="text-sm font-medium">SSH Enabled</label>
+                  <p className="text-xs text-gray-500 mt-1">If the image has no sshd (e.g., node/python), we attach a sidecar and keep it alive automatically.</p>
                 </div>
 
                 <div className="flex items-center space-x-2">
@@ -308,6 +369,7 @@ export default function ContainerTemplates() {
                     onChange={(e) => handleInputChange("persistentStorage", e.target.checked)}
                   />
                   <label htmlFor="persistentStorage" className="text-sm font-medium">Persistent Storage</label>
+                  <p className="text-xs text-gray-500 mt-1">Off by default to avoid PVC quota errors. Turn on only if students need saved data.</p>
                 </div>
 
                 <div className="flex items-center space-x-2">
@@ -342,16 +404,6 @@ export default function ContainerTemplates() {
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium mb-1">Arguments (one per line)</label>
-                <textarea
-                  value={formData.args}
-                  onChange={(e) => handleInputChange("args", e.target.value)}
-                  className="w-full border rounded-md px-3 py-2 h-20"
-                  placeholder="-c&#10;tail -f /dev/null"
-                />
-              </div>
-
               <div className="flex space-x-2">
                 <Button type="submit" className="bg-green-600 hover:bg-green-700">
                   {editingTemplate ? "Update Template" : "Create Template"}
@@ -370,7 +422,25 @@ export default function ContainerTemplates() {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {templates.map((template) => (
+        {templates.map((template) => {
+          let parsedLimits = {};
+          try {
+            parsedLimits = template.resourceLimits ? JSON.parse(template.resourceLimits) : {};
+          } catch (error) {
+            parsedLimits = {};
+          }
+
+          let parsedEnv = [];
+          try {
+            if (template.environmentVars) {
+              const envObject = JSON.parse(template.environmentVars);
+              parsedEnv = Object.entries(envObject).map(([key, value]) => `${key}=${value}`);
+            }
+          } catch (error) {
+            parsedEnv = [template.environmentVars];
+          }
+
+          return (
           <Card key={template.id} className="h-fit">
             <CardHeader>
               <div className="flex justify-between items-start">
@@ -406,10 +476,10 @@ export default function ContainerTemplates() {
                 )}
                 
                 <div className="grid grid-cols-2 gap-2 text-xs">
-                  {template.cpuLimit && <div><strong>CPU Limit:</strong> {template.cpuLimit}</div>}
-                  {template.memoryLimit && <div><strong>Memory Limit:</strong> {template.memoryLimit}</div>}
-                  {template.cpuRequest && <div><strong>CPU Request:</strong> {template.cpuRequest}</div>}
-                  {template.memoryRequest && <div><strong>Memory Request:</strong> {template.memoryRequest}</div>}
+                  {parsedLimits['cpu-limit'] && <div><strong>CPU Limit:</strong> {parsedLimits['cpu-limit']}</div>}
+                  {parsedLimits['memory-limit'] && <div><strong>Memory Limit:</strong> {parsedLimits['memory-limit']}</div>}
+                  {parsedLimits['cpu-request'] && <div><strong>CPU Request:</strong> {parsedLimits['cpu-request']}</div>}
+                  {parsedLimits['memory-request'] && <div><strong>Memory Request:</strong> {parsedLimits['memory-request']}</div>}
                 </div>
 
                 <div className="flex space-x-4 text-xs">
@@ -419,14 +489,26 @@ export default function ContainerTemplates() {
                   <span className={template.persistentStorage ? "text-blue-600" : "text-gray-400"}>
                     💾 Storage {template.persistentStorage ? "Persistent" : "Ephemeral"}
                   </span>
-                  <span className={template.shared ? "text-purple-600" : "text-gray-400"}>
-                    🌐 {template.shared ? "Shared" : "Private"}
+                <span className={template.isPublic ? "text-purple-600" : "text-gray-400"}>
+                    🌐 {template.isPublic ? "Shared" : "Private"}
                   </span>
                 </div>
+
+                {parsedEnv.length > 0 && (
+                  <div className="text-xs text-gray-600">
+                    <strong>Env:</strong>
+                    <ul className="list-disc ml-5">
+                      {parsedEnv.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
-        ))}
+          );
+        })}
       </div>
 
       {templates.length === 0 && (

@@ -32,8 +32,45 @@ public class ContainerController {
 
     @Data
     public static class CreateContainerRequest {
-        private Long imageId;  // Changed from templateId to imageId
+        private Long imageId;
+        private Long containerTemplateId;
         private Long studentId;
+        private String tierName;
+    }
+
+    /**
+     * Allow a student to self-provision a container from an image template
+     */
+    @PostMapping
+    @PreAuthorize("hasRole('STUDENT')")
+    public ResponseEntity<?> createContainerForCurrentStudent(
+            @RequestBody CreateContainerRequest request,
+            @AuthenticationPrincipal User student) {
+
+        try {
+            boolean hasImage = request.getImageId() != null;
+            boolean hasTemplate = request.getContainerTemplateId() != null;
+
+            if (!hasImage && !hasTemplate) {
+                return ResponseEntity.badRequest().body("imageId or containerTemplateId is required");
+            }
+            if (hasImage && hasTemplate) {
+                return ResponseEntity.badRequest().body("Provide either imageId or containerTemplateId, not both");
+            }
+
+            ContainerInstance instance;
+            if (hasTemplate) {
+                instance = containerInstanceService.createContainerFromTemplate(
+                        request.getContainerTemplateId(), student.getId(), student, request.getTierName());
+            } else {
+                instance = containerInstanceService.createContainerForStudent(
+                        request.getImageId(), student.getId(), student, request.getTierName());
+            }
+            return ResponseEntity.ok(instance);
+        } catch (Exception e) {
+            log.error("Failed to create container for student {}", student.getUsername(), e);
+            return ResponseEntity.badRequest().body("Failed to create container: " + e.getMessage());
+        }
     }
 
     @PostMapping("/create/{imageId}")
@@ -57,11 +94,31 @@ public class ContainerController {
             @RequestBody CreateContainerRequest request,
             @AuthenticationPrincipal User teacher) {
         try {
-            log.info("Teacher {} creating container for student {} using image {}", 
-                    teacher.getUsername(), request.getStudentId(), request.getImageId());
+            if (request.getStudentId() == null) {
+                return ResponseEntity.badRequest().body("studentId is required");
+            }
+
+            boolean hasImage = request.getImageId() != null;
+            boolean hasTemplate = request.getContainerTemplateId() != null;
+
+            if (!hasImage && !hasTemplate) {
+                return ResponseEntity.badRequest().body("imageId or containerTemplateId is required");
+            }
+            if (hasImage && hasTemplate) {
+                return ResponseEntity.badRequest().body("Provide either imageId or containerTemplateId, not both");
+            }
+
+            log.info("Teacher {} creating container for student {} using {} {}", 
+                    teacher.getUsername(),
+                    request.getStudentId(),
+                    hasTemplate ? "containerTemplateId" : "imageId",
+                    hasTemplate ? request.getContainerTemplateId() : request.getImageId());
             
-            ContainerInstance instance = containerInstanceService.createContainerForStudent(
-                    request.getImageId(), request.getStudentId(), teacher);
+            ContainerInstance instance = hasTemplate
+                    ? containerInstanceService.createContainerFromTemplate(
+                            request.getContainerTemplateId(), request.getStudentId(), teacher, request.getTierName())
+                    : containerInstanceService.createContainerForStudent(
+                            request.getImageId(), request.getStudentId(), teacher, request.getTierName());
             
             return ResponseEntity.ok(instance);
         } catch (Exception e) {
@@ -89,7 +146,7 @@ public class ContainerController {
      * Get containers for the authenticated user (students see only their own)
      */
     @GetMapping("/my-containers")
-    @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER')")
+    @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER', 'ADMIN')")
     public ResponseEntity<List<ContainerInstance>> getMyContainers(@AuthenticationPrincipal User user) {
         try {
             List<ContainerInstance> containers;
@@ -199,6 +256,30 @@ public class ContainerController {
             return ResponseEntity.internalServerError().build();
         }
     }
+
+    /**
+     * Retrieve container logs
+     */
+    @GetMapping("/{id}/logs")
+    @PreAuthorize("hasAnyRole('STUDENT', 'TEACHER', 'ADMIN')")
+    public ResponseEntity<?> getContainerLogs(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        try {
+            ContainerInstance container = containerInstanceService.findById(id);
+            if (container == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            if (!containerInstanceService.userCanAccessContainer(container, user)) {
+                return ResponseEntity.status(403).body("Access denied");
+            }
+
+            String logs = containerInstanceService.getContainerLogs(id, user);
+            return ResponseEntity.ok(Map.of("logs", logs));
+        } catch (Exception e) {
+            log.error("Failed to get logs for container {}", id, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", e.getMessage()));
+        }
+    }
     
     @GetMapping("/{id}/ssh-info")
     @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN') or @containerInstanceService.canStudentAccessContainer(#id, authentication.name)")
@@ -213,11 +294,13 @@ public class ContainerController {
             sshInfo.put("containerName", container.getName());
             sshInfo.put("status", container.getStatus());
             sshInfo.put("podName", container.getKubernetesPodName());
+            String namespace = container.getKubernetesNamespace() != null ? container.getKubernetesNamespace() : "default";
+            sshInfo.put("namespace", namespace);
             
             if ("Running".equals(container.getStatus())) {
                 // Get real SSH connection details from Kubernetes
                 String minikubeIp = containerInstanceService.getMinikubeIp();
-                Integer sshPort = containerInstanceService.getContainerSshPort(container.getKubernetesPodName());
+                Integer sshPort = containerInstanceService.getContainerSshPort(container);
                 
                 sshInfo.put("host", minikubeIp);
                 sshInfo.put("port", sshPort);
@@ -233,7 +316,7 @@ public class ContainerController {
                 // Add port-forward instructions for better compatibility
                 String serviceName = container.getKubernetesPodName() + "-ssh";
                 int localPort = 8023; // You can change this to any available port
-                sshInfo.put("portForwardCommand", "kubectl port-forward service/" + serviceName + " " + localPort + ":22");
+                sshInfo.put("portForwardCommand", "kubectl port-forward -n " + namespace + " service/" + serviceName + " " + localPort + ":22");
                 sshInfo.put("portForwardSsh", "ssh -p " + localPort + " root@127.0.0.1");
                 sshInfo.put("alternativeNote", "If direct connection fails (common on macOS), use port forwarding method below");
                 
@@ -269,6 +352,72 @@ public class ContainerController {
         } catch (Exception e) {
             log.error("Failed to get SSH info", e);
             return ResponseEntity.badRequest().body("Failed to get SSH info: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Delete a container (teachers and admins can delete any, students can delete their own)
+     */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN') or @containerInstanceService.canStudentAccessContainer(#id, authentication.name)")
+    public ResponseEntity<?> deleteContainer(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        try {
+            log.info("User {} attempting to delete container {}", user.getUsername(), id);
+            containerInstanceService.deleteContainer(id, user);
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Container deleted successfully");
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            log.error("Failed to delete container {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected error deleting container {}", id, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", "Internal server error"));
+        }
+    }
+
+    /**
+     * Stop a container (without deleting)
+     */
+    @PostMapping("/{id}/stop")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN') or @containerInstanceService.canStudentAccessContainer(#id, authentication.name)")
+    public ResponseEntity<?> stopContainer(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        try {
+            log.info("User {} attempting to stop container {}", user.getUsername(), id);
+            containerInstanceService.stopContainer(id, user);
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Container stopped successfully");
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            log.error("Failed to stop container {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected error stopping container {}", id, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", "Internal server error"));
+        }
+    }
+
+    /**
+     * Start (recreate) a container
+     */
+    @PostMapping("/{id}/start")
+    @PreAuthorize("hasRole('TEACHER') or hasRole('ADMIN') or @containerInstanceService.canStudentAccessContainer(#id, authentication.name)")
+    public ResponseEntity<?> startContainer(@PathVariable Long id, @AuthenticationPrincipal User user) {
+        try {
+            log.info("User {} attempting to start container {}", user.getUsername(), id);
+            containerInstanceService.startContainer(id, user);
+
+            Map<String, String> response = new HashMap<>();
+            response.put("message", "Container start requested");
+            return ResponseEntity.ok(response);
+        } catch (RuntimeException e) {
+            log.error("Failed to start container {}: {}", id, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Unexpected error starting container {}", id, e);
+            return ResponseEntity.internalServerError().body(Map.of("error", "Internal server error"));
         }
     }
 }

@@ -1,14 +1,14 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardTitle } from "../components/ui/card";
-import { Input } from "../components/ui/input";
+// import { Input } from "../components/ui/input"; // Remove if not used
 import { toast } from "react-hot-toast";
 import api from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function PodManagement() {
-  const { isTeacher, isStudent } = useAuth();
-  const [pods, setPods] = useState([]);
+  const { isTeacher, user } = useAuth();
+  // const [pods, setPods] = useState([]); // Remove if not used
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [containers, setContainers] = useState([]);
@@ -16,12 +16,18 @@ export default function PodManagement() {
   const [showCreateContainer, setShowCreateContainer] = useState(false);
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (user?.token) {
+      api.setToken(user.token);
+    }
+  }, [user?.token]);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       setLoading(true);
+      // Ensure API has the latest token before making requests
+      if (user?.token) {
+        api.setToken(user.token);
+      }
       
       if (isTeacher()) {
         // Teachers see all containers and can manage them
@@ -46,7 +52,13 @@ export default function PodManagement() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [isTeacher, user?.token]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // ...existing code...
 
   const handleCreateContainer = async () => {
     if (!selectedTemplate) {
@@ -55,7 +67,10 @@ export default function PodManagement() {
     }
 
     try {
-      await api.createContainerFromTemplate(selectedTemplate);
+      if (user?.token) {
+        api.setToken(user.token);
+      }
+      await api.createContainerFromTemplate(Number(selectedTemplate));
       toast.success("Container created successfully");
       setShowCreateContainer(false);
       setSelectedTemplate("");
@@ -68,6 +83,7 @@ export default function PodManagement() {
 
   const handleStartContainer = async (containerId) => {
     try {
+      if (user?.token) api.setToken(user.token);
       await api.startContainer(containerId);
       toast.success("Container started");
       loadData();
@@ -79,6 +95,7 @@ export default function PodManagement() {
 
   const handleStopContainer = async (containerId) => {
     try {
+      if (user?.token) api.setToken(user.token);
       await api.stopContainer(containerId);
       toast.success("Container stopped");
       loadData();
@@ -94,6 +111,7 @@ export default function PodManagement() {
     }
 
     try {
+      if (user?.token) api.setToken(user.token);
       await api.deleteContainer(containerId);
       toast.success("Container deleted");
       loadData();
@@ -137,7 +155,7 @@ export default function PodManagement() {
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">
-          {isTeacher() ? "Pod & Container Management" : "My Containers"}
+          {isTeacher() ? "Pod Management" : "My Pods"}
         </h1>
         {!isTeacher() && (
           <Button 
@@ -149,10 +167,10 @@ export default function PodManagement() {
         )}
       </div>
 
-      {/* Create Container Modal for Students */}
+      {/* Create Pod Modal for Students */}
       {showCreateContainer && (
         <Card>
-          <CardTitle className="mb-4 p-4">Create New Container</CardTitle>
+          <CardTitle className="mb-4 p-4">Create New Pod</CardTitle>
           <CardContent>
             <div className="space-y-4">
               <div>
@@ -173,7 +191,7 @@ export default function PodManagement() {
               
               <div className="flex space-x-2">
                 <Button onClick={handleCreateContainer} className="bg-green-600 hover:bg-green-700">
-                  Create Container
+                  Create Pod
                 </Button>
                 <Button 
                   onClick={() => setShowCreateContainer(false)}
@@ -187,10 +205,10 @@ export default function PodManagement() {
         </Card>
       )}
 
-      {/* Containers/Pods List */}
+      {/* Pods List */}
       <Card>
         <CardTitle className="mb-4 p-4">
-          {isTeacher() ? "All Student Containers" : "My Containers"}
+          {isTeacher() ? "All Student Pods" : "My Pods"}
         </CardTitle>
         <CardContent>
           <div className="space-y-4">
@@ -251,8 +269,8 @@ export default function PodManagement() {
             {containers.length === 0 && (
               <div className="text-center py-8 text-gray-500">
                 {isTeacher() 
-                  ? "No student containers found."
-                  : "No containers found. Create your first container to get started."
+                  ? "No student pods found."
+                  : "No pods found. Create your first pod to get started."
                 }
               </div>
             )}

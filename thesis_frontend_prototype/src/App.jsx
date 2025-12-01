@@ -9,6 +9,7 @@ import ContainerTemplates from "./pages/ContainerTemplates";
 import StudentContainers from "./pages/StudentContainers";
 import StudentContainerManagement from "./pages/StudentContainerManagement";
 import KubernetesManagement from "./pages/KubernetesManagement";
+import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 import Navbar from "./components/Navbar";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -56,6 +57,11 @@ function App() {
             <Route path="/kubernetes" element={
               <ProtectedRoute requireRole="ROLE_TEACHER">
                 <KubernetesManagement />
+              </ProtectedRoute>
+            } />
+            <Route path="/superadmin" element={
+              <ProtectedRoute requireRole="ROLE_ADMIN">
+                <SuperAdminDashboard />
               </ProtectedRoute>
             } />
           </Route>

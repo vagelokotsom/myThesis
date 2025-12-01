@@ -1,4 +1,6 @@
-const API_BASE_URL = 'http://localhost:8080/api';
+// Prefer same-origin by default to allow nginx to proxy /api to the backend
+const runtimeOrigin = (typeof window !== 'undefined' && window.location && window.location.origin) ? window.location.origin : '';
+const API_BASE_URL = (process.env.REACT_APP_API_URL || runtimeOrigin) + '/api';
 
 class ApiService {
   constructor() {
@@ -224,25 +226,27 @@ class ApiService {
     return await this.request('/containers');
   }
 
-  async createContainer(templateId) {
-    return await this.request('/containers', {
-      method: 'POST',
-      body: JSON.stringify({ templateId })
-    });
-  }
+  async createContainerInstance({ imageId = null, containerTemplateId = null, studentId = null, tierName = null } = {}) {
+    if (!imageId && !containerTemplateId) {
+      throw new Error('imageId or containerTemplateId is required');
+    }
 
-  async createContainerForStudent(imageId, studentId) {
-    console.log('=== API createContainerForStudent Debug ===');
-    console.log('imageId:', imageId, 'type:', typeof imageId);
-    console.log('studentId:', studentId, 'type:', typeof studentId);
-    
-    const body = { imageId, studentId };
-    console.log('Request body:', body);
-    
-    return await this.request('/containers/create-for-student', {
+    const body = {};
+    if (imageId) body.imageId = imageId;
+    if (containerTemplateId) body.containerTemplateId = containerTemplateId;
+    if (studentId) body.studentId = studentId;
+    if (tierName) body.tierName = tierName;
+
+    const endpoint = studentId ? '/containers/create-for-student' : '/containers';
+
+    return await this.request(endpoint, {
       method: 'POST',
       body: JSON.stringify(body)
     });
+  }
+
+  async createContainerForStudent(templateId, studentId) {
+    return await this.createContainerInstance({ imageId: templateId, studentId });
   }
 
   async startContainer(id) {
@@ -264,7 +268,11 @@ class ApiService {
   }
 
   async getContainerLogs(id) {
-    return await this.request(`/containers/${id}/logs`);
+    const response = await this.request(`/containers/${id}/logs`);
+    if (response && typeof response === 'object' && Object.prototype.hasOwnProperty.call(response, 'logs')) {
+      return response.logs;
+    }
+    return response;
   }
 
   async getContainerStats() {
@@ -403,14 +411,8 @@ class ApiService {
   }
 
   // Enhanced Container Instance Management
-  async createContainerFromTemplate(templateId, studentId = null) {
-    const body = { templateId };
-    if (studentId) body.studentId = studentId;
-    
-    return await this.request('/containers/create-for-student', {
-      method: 'POST',
-      body: JSON.stringify(body)
-    });
+  async createContainerFromTemplate(imageId, studentId = null) {
+    return await this.createContainerInstance({ imageId, studentId });
   }
 
   async getContainerStatus(id) {

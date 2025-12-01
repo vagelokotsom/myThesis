@@ -59,8 +59,8 @@ public class DeploymentService {
      * Create a new deployment
      */
     public KubernetesDeployment createDeployment(String namespace, String name, String image,
-                                                 int replicas, Map<String, String> labels,
-                                                 Map<String, String> resources) {
+                                                int replicas, Map<String, String> labels,
+                                                Map<String, String> resources) {
 
         Map<String, String> selectorLabels = new HashMap<>();
         selectorLabels.put("app", name);
@@ -101,7 +101,7 @@ public class DeploymentService {
                 .build();
 
         Deployment createdDeployment = kubernetesClient.apps().deployments()
-                .inNamespace(namespace).create(deployment);
+                .inNamespace(namespace).resource(deployment).serverSideApply();
 
         return mapDeploymentToDto(createdDeployment);
     }
@@ -146,7 +146,7 @@ public class DeploymentService {
                 .build();
 
         Deployment result = kubernetesClient.apps().deployments()
-                .inNamespace(namespace).withName(name).replace(updatedDeployment);
+                .inNamespace(namespace).resource(updatedDeployment).serverSideApply();
 
         return mapDeploymentToDto(result);
     }

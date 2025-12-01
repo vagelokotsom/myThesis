@@ -26,7 +26,7 @@ public class ContainerTemplateController {
      * Get all available container templates
      */
     @GetMapping
-    @PreAuthorize("hasAnyRole('TEACHER', 'STUDENT')")
+    @PreAuthorize("hasAnyRole('TEACHER', 'STUDENT', 'ADMIN')")
     public ResponseEntity<List<ContainerTemplate>> getAvailableTemplates(@AuthenticationPrincipal User user) {
         List<ContainerTemplate> templates = containerTemplateRepository.findAvailableTemplates(user);
         return ResponseEntity.ok(templates);
@@ -36,7 +36,7 @@ public class ContainerTemplateController {
      * Get SSH-enabled templates only
      */
     @GetMapping("/ssh-enabled")
-    @PreAuthorize("hasAnyRole('TEACHER', 'STUDENT')")
+    @PreAuthorize("hasAnyRole('TEACHER', 'STUDENT', 'ADMIN')")
     public ResponseEntity<List<ContainerTemplate>> getSshEnabledTemplates(@AuthenticationPrincipal User user) {
         List<ContainerTemplate> templates = containerTemplateRepository.findSshEnabledTemplates(user);
         return ResponseEntity.ok(templates);

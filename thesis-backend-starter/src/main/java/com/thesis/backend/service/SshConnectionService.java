@@ -226,7 +226,7 @@ public class SshConnectionService {
                 .endSpec()
                 .build();
         
-        kubernetesClient.pods().inNamespace(namespace).create(sshPod);
+    kubernetesClient.pods().inNamespace(namespace).resource(sshPod).serverSideApply();
         log.info("Created SSH-enabled pod: {}", newPodName);
     }
     
@@ -312,7 +312,7 @@ public class SshConnectionService {
                 .endSpec()
                 .build();
         
-        kubernetesClient.services().inNamespace(namespace).create(sshService);
+    kubernetesClient.services().inNamespace(namespace).resource(sshService).serverSideApply();
         log.info("Created SSH service {} on port {}", serviceName, port);
     }
     

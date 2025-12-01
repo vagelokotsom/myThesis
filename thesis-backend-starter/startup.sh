@@ -1,42 +1,24 @@
 #!/bin/bash
+set -euo pipefail
 
-# Startup script for SSH-enabled containers
+# Start SSH daemon for container templates that expect SSH access.
 
-# Start SSH service
-service ssh start
+# Root password comes from ROOT_PASSWORD env (default set via Config/Service).
+: "${ROOT_PASSWORD:=rootpass123}"
 
-# Set root password if provided
-if [ ! -z "$ROOT_PASSWORD" ]; then
-    echo "root:$ROOT_PASSWORD" | chpasswd
+# Student workspace user/password injected by backend per container start.
+: "${WORKSPACE_USER:=student}"
+: "${STUDENT_PASSWORD:=${ROOT_PASSWORD}}"
+
+echo "root:${ROOT_PASSWORD}" | chpasswd
+
+if ! id "${WORKSPACE_USER}" >/dev/null 2>&1; then
+  useradd -m -s /bin/bash "${WORKSPACE_USER}"
 fi
+echo "${WORKSPACE_USER}:${STUDENT_PASSWORD}" | chpasswd
 
-# Create student users if provided
-if [ ! -z "$SSH_USERS" ]; then
-    IFS=',' read -ra USERS <<< "$SSH_USERS"
-    for user_info in "${USERS[@]}"; do
-        IFS=':' read -ra USER_PASS <<< "$user_info"
-        username="${USER_PASS[0]}"
-        password="${USER_PASS[1]}"
-        
-        # Create user with home directory
-        useradd -m -s /bin/bash "$username"
-        
-        # Set password
-        echo "$username:$password" | chpasswd
-        
-        # Add user to sudo group
-        usermod -aG sudo "$username"
-        
-        # Create workspace directory for the user
-        mkdir -p "/home/$username/workspace"
-        chown "$username:$username" "/home/$username/workspace"
-        
-        echo "Created user: $username"
-    done
-fi
+mkdir -p /workspace
+chown "${WORKSPACE_USER}:${WORKSPACE_USER}" /workspace
 
-# Keep SSH server running
-echo "SSH server started. Container ready for connections."
-
-# Keep container running
-tail -f /dev/null
+service ssh start >/dev/null 2>&1 || true
+exec /usr/sbin/sshd -D -e

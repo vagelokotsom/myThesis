@@ -13,7 +13,7 @@ public class KubernetesService {
     private final KubernetesClient client = new KubernetesClientBuilder().build();
 
     public String createContainer(String image, String username) {
-        String podName = "pod-" + username + "-" + System.currentTimeMillis();
+    // Removed unused variable podName
         Pod pod = new PodBuilder()
                 .withNewMetadata()
                     .withName("example-pod")
@@ -27,7 +27,7 @@ public class KubernetesService {
                 .endSpec()
                 .build();
 
-        client.pods().inNamespace("default").create(pod);
+    client.pods().inNamespace("default").resource(pod).serverSideApply();
 
         return pod.getMetadata().getName();
     }
