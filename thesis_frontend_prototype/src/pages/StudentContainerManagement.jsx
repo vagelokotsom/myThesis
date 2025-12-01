@@ -20,6 +20,7 @@ export default function StudentContainerManagement() {
   const [sshInfo, setSshInfo] = useState(null);
   const [selectedStudent, setSelectedStudent] = useState('');
   const [selectedTemplateKey, setSelectedTemplateKey] = useState('');
+  const [selectedTier, setSelectedTier] = useState('standard');
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -153,7 +154,7 @@ export default function StudentContainerManagement() {
       }
       
       const studentId = parseInt(selectedStudent, 10);
-      const payload = { studentId };
+      const payload = { studentId, tierName: selectedTier };
       if (templateType === 'container') {
         payload.containerTemplateId = parsedTemplateId;
       } else {
@@ -325,6 +326,21 @@ export default function StudentContainerManagement() {
                   )}
                 </select>
               </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-1">Select Tier</label>
+                <select
+                  value={selectedTier}
+                  onChange={(e) => setSelectedTier(e.target.value)}
+                  className="w-full p-2 border rounded-md"
+                >
+                  <option value="standard">Standard (3 pods, 1-2Gi, 2 PVCs)</option>
+                  <option value="heavy">Heavy (5 pods, 4-6Gi, 3 PVCs)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  Tier controls namespace quota/limits for this student.
+                </p>
+              </div>
             </div>
 
             <div className="flex gap-2 mt-6">
@@ -486,14 +502,16 @@ export default function StudentContainerManagement() {
                 
                 {sshInfo.ready ? (
                   <div className="space-y-4">
-                    <div className="grid grid-cols-2 gap-2 text-sm">
-                      <div><strong>Host:</strong> {sshInfo.host}</div>
-                      <div><strong>Port:</strong> {sshInfo.port}</div>
-                      <div><strong>Username:</strong> {sshInfo.username}</div>
-                      <div><strong>Password:</strong> {sshInfo.password}</div>
-                    </div>
-                    
-                    <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div><strong>Host:</strong> {sshInfo.host}</div>
+                  <div><strong>Port:</strong> {sshInfo.port}</div>
+                  <div><strong>Namespace:</strong> {sshInfo.namespace || 'default'}</div>
+                  <div><strong>Service:</strong> {sshInfo.podName}-ssh</div>
+                  <div><strong>Username:</strong> {sshInfo.username}</div>
+                  <div><strong>Password:</strong> {sshInfo.password}</div>
+                </div>
+                
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
                       <p className="text-sm font-medium text-blue-800 mb-2">
                         <strong>Method 1: Direct Connection (may not work on macOS)</strong>
                       </p>

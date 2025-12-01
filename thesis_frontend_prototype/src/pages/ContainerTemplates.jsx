@@ -4,8 +4,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Input } from "../components/ui/input";
 import { toast } from "react-hot-toast";
 import api from "../services/api";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function ContainerTemplates() {
+  const { user } = useAuth();
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -21,7 +23,7 @@ export default function ContainerTemplates() {
     cpuRequest: "",
     memoryRequest: "",
     sshEnabled: true,
-    persistentStorage: true,
+    persistentStorage: false,
     storageSize: "1Gi",
     shared: true,
     environmentVars: "",
@@ -30,11 +32,14 @@ export default function ContainerTemplates() {
 
   useEffect(() => {
     loadTemplates();
-  }, []);
+  }, [user]);
 
   const loadTemplates = async () => {
     try {
       setLoading(true);
+      if (user?.token) {
+        api.setToken(user.token);
+      }
       const response = await api.getMyTemplates();
       setTemplates(response);
     } catch (error) {
@@ -63,7 +68,7 @@ export default function ContainerTemplates() {
       cpuRequest: "",
       memoryRequest: "",
       sshEnabled: true,
-      persistentStorage: true,
+      persistentStorage: false,
       storageSize: "1Gi",
       shared: true,
       environmentVars: "",
@@ -285,14 +290,15 @@ export default function ContainerTemplates() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium mb-1">Command</label>
-                  <Input
-                    value={formData.command}
-                    onChange={(e) => handleInputChange("command", e.target.value)}
-                    placeholder="e.g., /bin/bash"
-                  />
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Command</label>
+                <Input
+                  value={formData.command}
+                  onChange={(e) => handleInputChange("command", e.target.value)}
+                  placeholder="e.g., /bin/bash or leave blank"
+                />
+                <p className="text-xs text-gray-500 mt-1">If blank on base images, we keep the container alive for you.</p>
+              </div>
               </div>
 
               <div>
@@ -352,6 +358,7 @@ export default function ContainerTemplates() {
                     onChange={(e) => handleInputChange("sshEnabled", e.target.checked)}
                   />
                   <label htmlFor="sshEnabled" className="text-sm font-medium">SSH Enabled</label>
+                  <p className="text-xs text-gray-500 mt-1">If the image has no sshd (e.g., node/python), we attach a sidecar and keep it alive automatically.</p>
                 </div>
 
                 <div className="flex items-center space-x-2">
@@ -362,6 +369,7 @@ export default function ContainerTemplates() {
                     onChange={(e) => handleInputChange("persistentStorage", e.target.checked)}
                   />
                   <label htmlFor="persistentStorage" className="text-sm font-medium">Persistent Storage</label>
+                  <p className="text-xs text-gray-500 mt-1">Off by default to avoid PVC quota errors. Turn on only if students need saved data.</p>
                 </div>
 
                 <div className="flex items-center space-x-2">

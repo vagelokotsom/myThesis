@@ -226,7 +226,7 @@ class ApiService {
     return await this.request('/containers');
   }
 
-  async createContainerInstance({ imageId = null, containerTemplateId = null, studentId = null } = {}) {
+  async createContainerInstance({ imageId = null, containerTemplateId = null, studentId = null, tierName = null } = {}) {
     if (!imageId && !containerTemplateId) {
       throw new Error('imageId or containerTemplateId is required');
     }
@@ -235,6 +235,7 @@ class ApiService {
     if (imageId) body.imageId = imageId;
     if (containerTemplateId) body.containerTemplateId = containerTemplateId;
     if (studentId) body.studentId = studentId;
+    if (tierName) body.tierName = tierName;
 
     const endpoint = studentId ? '/containers/create-for-student' : '/containers';
 

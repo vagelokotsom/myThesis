@@ -59,8 +59,8 @@ public class DeploymentService {
      * Create a new deployment
      */
     public KubernetesDeployment createDeployment(String namespace, String name, String image,
-                                                 int replicas, Map<String, String> labels,
-                                                 Map<String, String> resources) {
+                                                int replicas, Map<String, String> labels,
+                                                Map<String, String> resources) {
 
         Map<String, String> selectorLabels = new HashMap<>();
         selectorLabels.put("app", name);

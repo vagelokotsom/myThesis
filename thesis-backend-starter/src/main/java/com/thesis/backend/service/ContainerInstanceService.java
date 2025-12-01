@@ -29,6 +29,7 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -42,6 +43,7 @@ public class ContainerInstanceService {
     private final ImageTemplateRepository imageTemplateRepository;
     private final UserRepository userRepository;
     private final KubernetesClient kubernetesClient;
+    private final StudentNamespaceService studentNamespaceService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     
     @Value("${ssh.container.namespace:default}")
@@ -56,14 +58,14 @@ public class ContainerInstanceService {
     /**
      * Create a container instance from a template for a specific student entity
      */
-    public ContainerInstance createContainerFromTemplate(Long templateId, User student, User teacher) {
-        return createContainerFromTemplateInternal(templateId, student, teacher);
+    public ContainerInstance createContainerFromTemplate(Long templateId, User student, User teacher, String tierName) {
+        return createContainerFromTemplateInternal(templateId, student, teacher, tierName);
     }
 
     /**
      * Create a container instance from a template for a student by ID (teacher/admin flow)
      */
-    public ContainerInstance createContainerFromTemplate(Long templateId, Long studentId, User actor) {
+    public ContainerInstance createContainerFromTemplate(Long templateId, Long studentId, User actor, String tierName) {
         User student = userRepository.findById(studentId)
                 .orElseThrow(() -> new RuntimeException("Student not found"));
 
@@ -71,13 +73,13 @@ public class ContainerInstanceService {
             throw new RuntimeException("User is not a student");
         }
 
-        return createContainerFromTemplateInternal(templateId, student, actor);
+        return createContainerFromTemplateInternal(templateId, student, actor, tierName);
     }
     
     /**
      * Create a container instance from an image template for a student (by IDs)
      */
-    public ContainerInstance createContainerForStudent(Long imageId, Long studentId, User actor) {
+    public ContainerInstance createContainerForStudent(Long imageId, Long studentId, User actor, String tierName) {
         // Find the student
         User student = userRepository.findById(studentId)
             .orElseThrow(() -> new RuntimeException("Student not found"));
@@ -90,6 +92,9 @@ public class ContainerInstanceService {
         // Find the image template
         ImageTemplate imageTemplate = imageTemplateRepository.findById(imageId)
             .orElseThrow(() -> new RuntimeException("Image template not found with id: " + imageId));
+
+        // Ensure namespace for the student exists (course support TBD)
+        String targetNamespace = studentNamespaceService.ensureStudentNamespace(student, null, tierName, null);
 
         // Generate unique name for the container
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
@@ -106,7 +111,8 @@ public class ContainerInstanceService {
             imageTemplate.getEnvironmentVars(),
             imageTemplate.getPersistentStorage(),
             imageTemplate.getStorageSize(),
-            true // SSH enabled for image templates
+            true, // SSH enabled for image templates
+            targetNamespace
         );
 
         // Create container instance record
@@ -114,6 +120,7 @@ public class ContainerInstanceService {
             .name(containerName)
             .status("Creating")
             .kubernetesPodName(podName)
+            .kubernetesNamespace(targetNamespace)
             .owner(student)
             .imageTemplate(imageTemplate)
             .build();
@@ -133,7 +140,7 @@ public class ContainerInstanceService {
     /**
      * Shared logic for container template provisioning
      */
-    private ContainerInstance createContainerFromTemplateInternal(Long templateId, User student, User actor) {
+    private ContainerInstance createContainerFromTemplateInternal(Long templateId, User student, User actor, String tierName) {
         ContainerTemplate template = containerTemplateRepository.findById(templateId)
                 .orElseThrow(() -> new RuntimeException("Container template not found with id: " + templateId));
 
@@ -152,6 +159,8 @@ public class ContainerInstanceService {
         String storageSize = template.getStorageSize();
         Boolean sshEnabled = template.getSshEnabled() != null ? template.getSshEnabled() : Boolean.TRUE;
 
+        String targetNamespace = studentNamespaceService.ensureStudentNamespace(student, null, tierName, null);
+
         String podName = createUnifiedKubernetesPod(
                 containerName,
                 template.getDockerImage(),
@@ -160,13 +169,15 @@ public class ContainerInstanceService {
                 environmentVars,
                 persistentStorage,
                 storageSize,
-                sshEnabled
+                sshEnabled,
+                targetNamespace
         );
 
         ContainerInstance instance = ContainerInstance.builder()
                 .name(containerName)
                 .status("Creating")
                 .kubernetesPodName(podName)
+                .kubernetesNamespace(targetNamespace)
                 .owner(student)
                 .imageTemplate(null)
                 .containerTemplate(template)
@@ -234,24 +245,80 @@ public class ContainerInstanceService {
             Map<String, String> environmentVars,
             Boolean persistentStorage,
             String storageSize,
-            Boolean sshEnabled
+            Boolean sshEnabled,
+            String targetNamespace
     ) {
+        String effectiveNamespace = resolveNamespace(targetNamespace);
+        boolean sshEnabledFlag = sshEnabled != null && sshEnabled;
         Map<String, String> labels = new HashMap<>();
         labels.put("app", containerName);
         labels.put("owner", student.getUsername());
         labels.put("type", "student-container");
-        labels.put("ssh-enabled", sshEnabled != null && sshEnabled ? "true" : "false");
+        labels.put("ssh-enabled", sshEnabledFlag ? "true" : "false");
 
         // Build container
         String resolvedImage = (dockerImage != null && !dockerImage.isBlank()) ? dockerImage : sshImageName;
 
-        ContainerBuilder containerBuilder = new ContainerBuilder()
+        ContainerBuilder mainContainer = new ContainerBuilder()
             .withName("main-container")
             .withImage(resolvedImage)
             .withImagePullPolicy("IfNotPresent");
 
-        if (sshEnabled != null && sshEnabled) {
-            containerBuilder = containerBuilder
+        // Keep main container alive if it has no long-running process (non-SSH images)
+        if (!sshEnabledFlag) {
+            mainContainer = mainContainer.withCommand(Arrays.asList("/bin/sh", "-c", "tail -f /dev/null"));
+        }
+
+
+        // Add environment variables
+        if (environmentVars != null && !environmentVars.isEmpty()) {
+            for (Map.Entry<String, String> entry : environmentVars.entrySet()) {
+                mainContainer = mainContainer
+                        .addNewEnv()
+                            .withName(entry.getKey())
+                            .withValue(entry.getValue())
+                        .endEnv();
+            }
+        }
+        // Always add workspace user
+        mainContainer = mainContainer
+                .addNewEnv()
+                    .withName("WORKSPACE_USER")
+                    .withValue(student.getUsername())
+                .endEnv();
+
+        // Add resource limits
+        if (resourceLimits != null && !resourceLimits.isEmpty()) {
+            ContainerBuilder.ResourcesNested<ContainerBuilder> resourcesBuilder = mainContainer.withNewResources();
+            if (resourceLimits.containsKey("memory-request")) {
+                resourcesBuilder = resourcesBuilder.addToRequests("memory", new Quantity(resourceLimits.get("memory-request")));
+            }
+            if (resourceLimits.containsKey("cpu-request")) {
+                resourcesBuilder = resourcesBuilder.addToRequests("cpu", new Quantity(resourceLimits.get("cpu-request")));
+            }
+            if (resourceLimits.containsKey("memory-limit")) {
+                resourcesBuilder = resourcesBuilder.addToLimits("memory", new Quantity(resourceLimits.get("memory-limit")));
+            }
+            if (resourceLimits.containsKey("cpu-limit")) {
+                resourcesBuilder = resourcesBuilder.addToLimits("cpu", new Quantity(resourceLimits.get("cpu-limit")));
+            }
+            mainContainer = resourcesBuilder.endResources();
+        }
+
+        // Add persistent volume mount if required
+        if (persistentStorage != null && persistentStorage) {
+            mainContainer = mainContainer
+                    .addNewVolumeMount()
+                        .withName("workspace-storage")
+                        .withMountPath("/workspace")
+                    .endVolumeMount();
+        }
+
+        // Build the pod spec
+        // For SSH-enabled templates, expose SSH on the main container; otherwise attach sidecar
+        PodSpecBuilder podSpecBuilder = new PodSpecBuilder();
+        if (sshEnabledFlag) {
+            mainContainer = mainContainer
                     .addNewPort()
                         .withContainerPort(22)
                         .withProtocol("TCP")
@@ -265,56 +332,40 @@ public class ContainerInstanceService {
                         .withName("SSH_ENABLED")
                         .withValue("true")
                     .endEnv();
-        }
+            podSpecBuilder = podSpecBuilder.addToContainers(mainContainer.build());
+        } else {
+            int sidecarSshPort = 2222;
+            String sidecarCmd = String.format("echo \"root:%s\" | chpasswd && /usr/sbin/sshd -D -p %d -o PermitRootLogin=yes -o PasswordAuthentication=yes",
+                    studentSshPassword, sidecarSshPort);
+            ContainerBuilder sshSidecar = new ContainerBuilder()
+                    .withName("ssh-sidecar")
+                    .withImage(sshImageName)
+                    .withImagePullPolicy("IfNotPresent")
+                    .withCommand(Arrays.asList("/bin/sh", "-c", sidecarCmd))
+                    .addNewPort()
+                        .withContainerPort(sidecarSshPort)
+                        .withProtocol("TCP")
+                        .withName("ssh")
+                    .endPort()
+                    .addNewEnv()
+                        .withName("ROOT_PASSWORD")
+                        .withValue(studentSshPassword)
+                    .endEnv()
+                    .addNewEnv()
+                        .withName("SSH_ENABLED")
+                        .withValue("true")
+                    .endEnv();
 
-        // Add environment variables
-        if (environmentVars != null && !environmentVars.isEmpty()) {
-            for (Map.Entry<String, String> entry : environmentVars.entrySet()) {
-                containerBuilder = containerBuilder
-                        .addNewEnv()
-                            .withName(entry.getKey())
-                            .withValue(entry.getValue())
-                        .endEnv();
+            if (persistentStorage != null && persistentStorage) {
+                sshSidecar = sshSidecar
+                        .addNewVolumeMount()
+                            .withName("workspace-storage")
+                            .withMountPath("/workspace")
+                        .endVolumeMount();
             }
+            podSpecBuilder = podSpecBuilder.addToContainers(mainContainer.build(), sshSidecar.build());
         }
-        // Always add workspace user
-        containerBuilder = containerBuilder
-                .addNewEnv()
-                    .withName("WORKSPACE_USER")
-                    .withValue(student.getUsername())
-                .endEnv();
-
-        // Add resource limits
-        if (resourceLimits != null && !resourceLimits.isEmpty()) {
-            ContainerBuilder.ResourcesNested<ContainerBuilder> resourcesBuilder = containerBuilder.withNewResources();
-            if (resourceLimits.containsKey("memory-request")) {
-                resourcesBuilder = resourcesBuilder.addToRequests("memory", new Quantity(resourceLimits.get("memory-request")));
-            }
-            if (resourceLimits.containsKey("cpu-request")) {
-                resourcesBuilder = resourcesBuilder.addToRequests("cpu", new Quantity(resourceLimits.get("cpu-request")));
-            }
-            if (resourceLimits.containsKey("memory-limit")) {
-                resourcesBuilder = resourcesBuilder.addToLimits("memory", new Quantity(resourceLimits.get("memory-limit")));
-            }
-            if (resourceLimits.containsKey("cpu-limit")) {
-                resourcesBuilder = resourcesBuilder.addToLimits("cpu", new Quantity(resourceLimits.get("cpu-limit")));
-            }
-            containerBuilder = resourcesBuilder.endResources();
-        }
-
-        // Add persistent volume mount if required
-        if (persistentStorage != null && persistentStorage) {
-            containerBuilder = containerBuilder
-                    .addNewVolumeMount()
-                        .withName("workspace-storage")
-                        .withMountPath("/workspace")
-                    .endVolumeMount();
-        }
-
-        // Build the pod spec
-        PodSpecBuilder podSpecBuilder = new PodSpecBuilder()
-                .addToContainers(containerBuilder.build())
-                .withRestartPolicy("Always");
+        podSpecBuilder = podSpecBuilder.withRestartPolicy("Always");
 
         // Add persistent volume if required
         if (persistentStorage != null && persistentStorage) {
@@ -331,7 +382,7 @@ public class ContainerInstanceService {
         Pod pod = new PodBuilder()
                 .withNewMetadata()
                     .withName(containerName)
-                    .withNamespace(namespace)
+                    .withNamespace(effectiveNamespace)
                     .withLabels(labels)
                 .endMetadata()
                 .withSpec(podSpecBuilder.build())
@@ -339,15 +390,17 @@ public class ContainerInstanceService {
 
         // Create PVC if persistent storage is required
         if (persistentStorage != null && persistentStorage) {
-            createPersistentVolumeClaim(containerName, storageSize);
+            createPersistentVolumeClaim(containerName, storageSize, effectiveNamespace);
         }
 
         // Create the pod
-        kubernetesClient.pods().inNamespace(namespace).resource(pod).create();
+        kubernetesClient.pods().inNamespace(effectiveNamespace).resource(pod).create();
 
         // Create NodePort service for SSH access if enabled
         if (sshEnabled != null && sshEnabled) {
-            createNodePortService(containerName, labels);
+            createNodePortService(containerName, labels, effectiveNamespace, new IntOrString(22));
+        } else {
+            createNodePortService(containerName, labels, effectiveNamespace, new IntOrString(2222));
         }
 
         log.info("Created unified Kubernetes pod {} for student {}", containerName, student.getUsername());
@@ -375,6 +428,7 @@ public class ContainerInstanceService {
     public void stopContainer(Long instanceId, User user) {
         ContainerInstance instance = containerInstanceRepository.findById(instanceId)
                 .orElseThrow(() -> new RuntimeException("Container not found"));
+        String effectiveNamespace = resolveNamespace(instance.getKubernetesNamespace());
         
         // Check authorization
         if (!canAccessContainer(instance, user)) {
@@ -383,8 +437,8 @@ public class ContainerInstanceService {
         
         // Delete the Kubernetes pod and service
         try {
-            kubernetesClient.pods().inNamespace(namespace).withName(instance.getKubernetesPodName()).delete();
-            kubernetesClient.services().inNamespace(namespace).withName(instance.getKubernetesPodName() + "-ssh").delete();
+            kubernetesClient.pods().inNamespace(effectiveNamespace).withName(instance.getKubernetesPodName()).delete();
+            kubernetesClient.services().inNamespace(effectiveNamespace).withName(instance.getKubernetesPodName() + "-ssh").delete();
             
             log.info("Stopped Kubernetes pod and service for container {}", instance.getName());
         } catch (Exception e) {
@@ -404,6 +458,7 @@ public class ContainerInstanceService {
     public void startContainer(Long instanceId, User user) {
         ContainerInstance instance = containerInstanceRepository.findById(instanceId)
                 .orElseThrow(() -> new RuntimeException("Container not found"));
+        String effectiveNamespace = resolveNamespace(instance.getKubernetesNamespace());
         
         if (!canAccessContainer(instance, user)) {
             throw new RuntimeException("Access denied");
@@ -423,12 +478,12 @@ public class ContainerInstanceService {
 
         // Clean up any lingering Kubernetes resources just to be safe
         try {
-            kubernetesClient.pods().inNamespace(namespace).withName(containerName).delete();
+            kubernetesClient.pods().inNamespace(effectiveNamespace).withName(containerName).delete();
         } catch (Exception e) {
             log.debug("Unable to delete existing pod {} during restart: {}", containerName, e.getMessage());
         }
         try {
-            kubernetesClient.services().inNamespace(namespace).withName(containerName + "-ssh").delete();
+            kubernetesClient.services().inNamespace(effectiveNamespace).withName(containerName + "-ssh").delete();
         } catch (Exception e) {
             log.debug("Unable to delete existing service {}-ssh during restart: {}", containerName, e.getMessage());
         }
@@ -444,7 +499,8 @@ public class ContainerInstanceService {
                 template.getEnvironmentVars(),
                 template.getPersistentStorage(),
                 template.getStorageSize(),
-                true
+                true,
+                effectiveNamespace
         );
 
         // Update status asynchronously based on the real pod state
@@ -459,6 +515,7 @@ public class ContainerInstanceService {
     public void deleteContainer(Long instanceId, User user) {
         ContainerInstance instance = containerInstanceRepository.findById(instanceId)
                 .orElseThrow(() -> new RuntimeException("Container not found"));
+        String effectiveNamespace = resolveNamespace(instance.getKubernetesNamespace());
         
         if (!canAccessContainer(instance, user)) {
             throw new RuntimeException("Access denied");
@@ -466,10 +523,10 @@ public class ContainerInstanceService {
         
         // Delete Kubernetes resources
         try {
-            kubernetesClient.pods().inNamespace(namespace).withName(instance.getKubernetesPodName()).delete();
+            kubernetesClient.pods().inNamespace(effectiveNamespace).withName(instance.getKubernetesPodName()).delete();
             
             // Delete the SSH service
-            kubernetesClient.services().inNamespace(namespace).withName(instance.getKubernetesPodName() + "-ssh").delete();
+            kubernetesClient.services().inNamespace(effectiveNamespace).withName(instance.getKubernetesPodName() + "-ssh").delete();
             
             log.info("Deleted Kubernetes pod and service for container {}", instance.getName());
         } catch (Exception e) {
@@ -488,6 +545,7 @@ public class ContainerInstanceService {
     public String getContainerLogs(Long instanceId, User user) {
         ContainerInstance instance = containerInstanceRepository.findById(instanceId)
                 .orElseThrow(() -> new RuntimeException("Container not found"));
+        String effectiveNamespace = resolveNamespace(instance.getKubernetesNamespace());
         
         if (!canAccessContainer(instance, user)) {
             throw new RuntimeException("Access denied");
@@ -495,7 +553,7 @@ public class ContainerInstanceService {
         
         try {
             return kubernetesClient.pods()
-                    .inNamespace(namespace)
+                    .inNamespace(effectiveNamespace)
                     .withName(instance.getKubernetesPodName())
                     .getLog();
         } catch (Exception e) {
@@ -507,10 +565,11 @@ public class ContainerInstanceService {
     /**
      * Create PVC for persistent storage
      */
-    private void createPersistentVolumeClaim(String name, String size) {
+    private void createPersistentVolumeClaim(String name, String size, String targetNamespace) {
         String pvcName = name + "-pvc";
 
-        if (kubernetesClient.persistentVolumeClaims().inNamespace(namespace).withName(pvcName).get() != null) {
+        String effectiveNamespace = resolveNamespace(targetNamespace);
+        if (kubernetesClient.persistentVolumeClaims().inNamespace(effectiveNamespace).withName(pvcName).get() != null) {
             log.debug("PVC {} already exists, reusing", pvcName);
             return;
         }
@@ -528,18 +587,19 @@ public class ContainerInstanceService {
                 .endSpec()
                 .build();
 
-        kubernetesClient.persistentVolumeClaims().inNamespace(namespace).resource(pvc).create();
+        kubernetesClient.persistentVolumeClaims().inNamespace(effectiveNamespace).resource(pvc).create();
     }
     
     /**
      * Update container status by checking Kubernetes pod status
      */
     public void updateContainerStatus(ContainerInstance instance) {
+        String effectiveNamespace = resolveNamespace(instance.getKubernetesNamespace());
         try {
             log.debug("Checking pod status for: {}", instance.getKubernetesPodName());
             
             Pod pod = kubernetesClient.pods()
-                    .inNamespace(namespace)
+                    .inNamespace(effectiveNamespace)
                     .withName(instance.getKubernetesPodName())
                     .get();
             
@@ -591,7 +651,8 @@ public class ContainerInstanceService {
     /**
      * Create NodePort service for SSH access to a container
      */
-    private void createNodePortService(String containerName, Map<String, String> labels) {
+    private void createNodePortService(String containerName, Map<String, String> labels, String targetNamespace, IntOrString targetPort) {
+        String effectiveNamespace = resolveNamespace(targetNamespace);
         try {
             // Calculate a unique NodePort (30000-32767 range in Kubernetes)
             int nodePort = 30000 + Math.abs(containerName.hashCode() % 2767);
@@ -608,14 +669,14 @@ public class ContainerInstanceService {
                         .addNewPort()
                             .withName("ssh")
                             .withPort(22)
-                            .withTargetPort(new IntOrString(22))
+                            .withTargetPort(targetPort)
                             .withNodePort(nodePort)
                             .withProtocol("TCP")
                         .endPort()
                     .endSpec()
                     .build();
             
-            kubernetesClient.services().inNamespace(namespace).resource(service).create();
+            kubernetesClient.services().inNamespace(effectiveNamespace).resource(service).create();
             
             log.info("Created NodePort service {}-ssh with port {} for SSH access", containerName, nodePort);
         } catch (Exception e) {
@@ -626,10 +687,12 @@ public class ContainerInstanceService {
     /**
      * Get the NodePort assigned to a container's SSH service
      */
-    public Integer getContainerSshPort(String containerName) {
+    public Integer getContainerSshPort(ContainerInstance instance) {
+        String containerName = instance.getKubernetesPodName();
+        String effectiveNamespace = resolveNamespace(instance.getKubernetesNamespace());
         try {
             io.fabric8.kubernetes.api.model.Service service = kubernetesClient.services()
-                    .inNamespace(namespace)
+                    .inNamespace(effectiveNamespace)
                     .withName(containerName + "-ssh")
                     .get();
             
@@ -698,5 +761,9 @@ public class ContainerInstanceService {
      */
     public ContainerInstance findById(Long id) {
         return containerInstanceRepository.findById(id).orElse(null);
+    }
+
+    private String resolveNamespace(String requestedNamespace) {
+        return (requestedNamespace != null && !requestedNamespace.isBlank()) ? requestedNamespace : this.namespace;
     }
 }

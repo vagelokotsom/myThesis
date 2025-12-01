@@ -3,8 +3,10 @@ import api from "../services/api";
 import { Card, CardContent, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { Button } from "../components/ui/button";
+import { useAuth } from "../contexts/AuthContext";
 
 export default function CourseManagement() {
+  const { user } = useAuth();
   const [courses, setCourses] = useState([]);
   const [newCourse, setNewCourse] = useState({ name: "", description: "" });
   const [loading, setLoading] = useState(false);
@@ -30,7 +32,7 @@ export default function CourseManagement() {
   useEffect(() => {
     loadCourses();
     loadUsers();
-  }, []);
+  }, [user]);
 
   const loadCourses = async () => {
     setLoading(true);
@@ -47,6 +49,9 @@ export default function CourseManagement() {
   const loadUsers = async () => {
     setLoading(true);
     try {
+      if (user?.token) {
+        api.setToken(user.token);
+      }
       const data = await api.get("/superadmin/users");
       setUsers(data);
     } catch (error) {

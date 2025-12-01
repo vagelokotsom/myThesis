@@ -35,6 +35,7 @@ public class ContainerController {
         private Long imageId;
         private Long containerTemplateId;
         private Long studentId;
+        private String tierName;
     }
 
     /**
@@ -60,10 +61,10 @@ public class ContainerController {
             ContainerInstance instance;
             if (hasTemplate) {
                 instance = containerInstanceService.createContainerFromTemplate(
-                        request.getContainerTemplateId(), student.getId(), student);
+                        request.getContainerTemplateId(), student.getId(), student, request.getTierName());
             } else {
                 instance = containerInstanceService.createContainerForStudent(
-                        request.getImageId(), student.getId(), student);
+                        request.getImageId(), student.getId(), student, request.getTierName());
             }
             return ResponseEntity.ok(instance);
         } catch (Exception e) {
@@ -115,9 +116,9 @@ public class ContainerController {
             
             ContainerInstance instance = hasTemplate
                     ? containerInstanceService.createContainerFromTemplate(
-                            request.getContainerTemplateId(), request.getStudentId(), teacher)
+                            request.getContainerTemplateId(), request.getStudentId(), teacher, request.getTierName())
                     : containerInstanceService.createContainerForStudent(
-                            request.getImageId(), request.getStudentId(), teacher);
+                            request.getImageId(), request.getStudentId(), teacher, request.getTierName());
             
             return ResponseEntity.ok(instance);
         } catch (Exception e) {
@@ -293,11 +294,13 @@ public class ContainerController {
             sshInfo.put("containerName", container.getName());
             sshInfo.put("status", container.getStatus());
             sshInfo.put("podName", container.getKubernetesPodName());
+            String namespace = container.getKubernetesNamespace() != null ? container.getKubernetesNamespace() : "default";
+            sshInfo.put("namespace", namespace);
             
             if ("Running".equals(container.getStatus())) {
                 // Get real SSH connection details from Kubernetes
                 String minikubeIp = containerInstanceService.getMinikubeIp();
-                Integer sshPort = containerInstanceService.getContainerSshPort(container.getKubernetesPodName());
+                Integer sshPort = containerInstanceService.getContainerSshPort(container);
                 
                 sshInfo.put("host", minikubeIp);
                 sshInfo.put("port", sshPort);
@@ -313,7 +316,7 @@ public class ContainerController {
                 // Add port-forward instructions for better compatibility
                 String serviceName = container.getKubernetesPodName() + "-ssh";
                 int localPort = 8023; // You can change this to any available port
-                sshInfo.put("portForwardCommand", "kubectl port-forward service/" + serviceName + " " + localPort + ":22");
+                sshInfo.put("portForwardCommand", "kubectl port-forward -n " + namespace + " service/" + serviceName + " " + localPort + ":22");
                 sshInfo.put("portForwardSsh", "ssh -p " + localPort + " root@127.0.0.1");
                 sshInfo.put("alternativeNote", "If direct connection fails (common on macOS), use port forwarding method below");
                 

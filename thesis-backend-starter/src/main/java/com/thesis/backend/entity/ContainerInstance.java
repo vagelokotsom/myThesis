@@ -12,6 +12,7 @@ public class ContainerInstance {
     private String name;
     private String status;
     private String kubernetesPodName;
+    private String kubernetesNamespace;
     
     @Column(name = "created_at")
     private LocalDateTime createdAt;
