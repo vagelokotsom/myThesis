@@ -2,10 +2,6 @@ package com.thesis.backend.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
-import java.util.HashSet;
-import java.util.Set;
-
-
 @Getter
 @Setter
 @NoArgsConstructor
@@ -24,10 +20,6 @@ public class Course {
     private User teacher;
 
     @OneToMany(mappedBy = "course", cascade = CascadeType.ALL, orphanRemoval = true)
-    private Set<Pod> pods = new HashSet<>();
-
-    @OneToMany(mappedBy = "course", cascade = CascadeType.ALL, orphanRemoval = true)
     @com.fasterxml.jackson.annotation.JsonManagedReference
-    private Set<Enrollment> enrollments = new HashSet<>();
+    private java.util.Set<Enrollment> enrollments = new java.util.HashSet<>();
 }
-

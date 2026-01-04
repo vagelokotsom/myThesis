@@ -36,7 +36,6 @@ thesis/
 │   ├── package.json                 # Dependencies
 │   └── Dockerfile                   # Frontend Docker image
 ├── k8s/                             # Kubernetes Manifests
-│   ├── rbac-setup.yaml             # RBAC configuration
 │   ├── base/                       # Base Kubernetes resources
 │   └── overlays/                   # Environment-specific overrides
 └── README.md                        # Documentation
@@ -374,16 +373,11 @@ minikube image load thesis-frontend:v3
 
 # 3. Deploy
 cd ../k8s/overlays/minikube
-kubectl apply -f ../../rbac-setup.yaml  # Create this file with RBAC config
 kubectl apply -k .
 
 # 4. Get URLs
 minikube service frontend-service --url
-minikube service backend-service --url
-
-# 5. Update frontend API URL and redeploy
-echo "REACT_APP_API_URL=http://127.0.0.1:[BACKEND_PORT]" > ../../thesis_frontend_prototype/.env.production
-kubectl rollout restart deployment/thesis-frontend
+# Backend is reached via the frontend nginx proxy at /api (same-origin)
 ```
 
 ### **🎯 Γρήγορη Αναφορά Εντολών**
@@ -615,4 +609,3 @@ ssh -p 8023 root@127.0.0.1
 **🎓 Made with ❤️ for Educational Purposes**
 
 *This project demonstrates modern container orchestration, microservices architecture, and educational technology integration using industry-standard tools and practices.*
-

@@ -1,4 +1,14 @@
 .DS_Store
+**/.DS_Store
+
+# Gradle / Java
 .gradle_cache/
 .gradle/
-build/
+**/build/
+**/bin/
+**/*.class
+
+# Node / React
+**/node_modules/
+**/dist/
+**/build/
