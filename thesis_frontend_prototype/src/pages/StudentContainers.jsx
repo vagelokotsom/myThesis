@@ -33,7 +33,7 @@ export default function StudentContainers() {
 
       const [podsResponse, templatesResponse] = await Promise.all([
         teacherView ? api.getAllContainers() : api.getMyContainers(),
-        api.getImageTemplates()
+        teacherView ? api.getImageTemplates() : api.getSshEnabledTemplates()
       ]);
 
       setTemplates(templatesResponse || []);
@@ -132,9 +132,10 @@ export default function StudentContainers() {
 
   const handleStartPod = async (podId) => {
     try {
-  await api.startContainer(podId);
-  toast.success("Pod started");
-  loadData();
+      await api.startContainer(podId);
+      await api.refreshContainerStatus(podId).catch(() => null);
+      toast.success("Pod started");
+      loadData();
     } catch (error) {
       console.error("Failed to start container:", error);
       toast.error("Failed to start container");
@@ -143,9 +144,10 @@ export default function StudentContainers() {
 
   const handleStopPod = async (podId) => {
     try {
-  await api.stopContainer(podId);
-  toast.success("Pod stopped");
-  loadData();
+      await api.stopContainer(podId);
+      await api.refreshContainerStatus(podId).catch(() => null);
+      toast.success("Pod stopped");
+      loadData();
     } catch (error) {
       console.error("Failed to stop container:", error);
       toast.error("Failed to stop container");
@@ -153,14 +155,14 @@ export default function StudentContainers() {
   };
 
   const handleDeletePod = async (podId) => {
-  if (!window.confirm("Are you sure you want to delete this pod? This action cannot be undone.")) {
+    if (!window.confirm("Are you sure you want to delete this pod? This action cannot be undone.")) {
       return;
     }
 
     try {
-  await api.deleteContainer(podId);
-  toast.success("Pod deleted");
-  loadData();
+      await api.deleteContainer(podId);
+      toast.success("Pod deleted");
+      loadData();
     } catch (error) {
       console.error("Failed to delete container:", error);
       toast.error("Failed to delete container");
@@ -517,6 +519,24 @@ export default function StudentContainers() {
         </Card>
       )}
 
+      {/* SSH Quick Guide for Students */}
+      {!isTeacher() && (
+        <Card>
+          <CardHeader>
+            <CardTitle>SSH Quick Guide</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2 text-sm text-gray-700">
+              <p>1) Create a pod from a template, then wait for status to become Running.</p>
+              <p>2) Click <strong>SSH Info</strong> on a pod card to see the exact host and port.</p>
+              <p>3) For direct access: <span className="font-mono">ssh -p &lt;port&gt; root@&lt;host&gt;</span>.</p>
+              <p>4) If direct access fails on macOS, use the port-forward command shown in SSH Info.</p>
+              <p className="text-gray-500">Tip: SSH details are per pod, so always use the SSH Info button for the correct values.</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Logs Modal */}
       {showLogsFor && (
         <Card className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -552,6 +572,7 @@ export default function StudentContainers() {
               <div className="bg-gray-50 p-4 rounded-md">
                 <h3 className="font-medium mb-2">Pod: {selectedPod.name}</h3>
                 <p className="text-sm text-gray-600 mb-2">Image: {sshInfo.dockerImage}</p>
+                <p className="text-xs text-gray-500 mb-2">SSH is provided by the main container for SSH-ready images, or by a sidecar for standard images.</p>
 
                 {sshInfo.ready ? (
                   <div className="space-y-4">
@@ -559,7 +580,6 @@ export default function StudentContainers() {
                       <div><strong>Host:</strong> {sshInfo.host}</div>
                       <div><strong>Port:</strong> {sshInfo.port}</div>
                       <div><strong>Username:</strong> {sshInfo.username}</div>
-                      <div><strong>Password:</strong> {sshInfo.password}</div>
                     </div>
 
                     <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded">
@@ -578,6 +598,9 @@ export default function StudentContainers() {
                           Copy
                         </Button>
                       </div>
+                      <p className="text-xs text-blue-700 mt-2">
+                        Use your SSH key: ssh -i ~/.ssh/id_ed25519 -p {sshInfo.port} {sshInfo.username}@{sshInfo.host}
+                      </p>
                       <p className="text-xs text-blue-700 mt-2">
                         ⚠️ May not work on macOS due to Docker/Minikube networking limitations
                       </p>
@@ -603,16 +626,13 @@ export default function StudentContainers() {
                         )}
 
                         {/* Step-by-step instructions */}
-                        {sshInfo.stepByStepInstructions && (
-                          <div className="space-y-3 mb-4">
-                            <p className="text-xs font-medium text-green-700">📋 Step-by-Step Instructions:</p>
-                            {Object.entries(sshInfo.stepByStepInstructions).map(([step, instruction]) => (
-                              <div key={step} className="text-xs text-green-700">
-                                <strong>{step.replace('step', 'Step ')}:</strong> {instruction}
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                        <div className="space-y-3 mb-4">
+                          <p className="text-xs font-medium text-green-700">📋 Step-by-Step Instructions:</p>
+                          <div className="text-xs text-green-700"><strong>Step 1:</strong> Open a terminal/command prompt</div>
+                          <div className="text-xs text-green-700"><strong>Step 2:</strong> Run the port-forward command below (keep this terminal open)</div>
+                          <div className="text-xs text-green-700"><strong>Step 3:</strong> Open a new terminal window</div>
+                          <div className="text-xs text-green-700"><strong>Step 4:</strong> Connect via SSH with your key (see command below)</div>
+                        </div>
 
                         {/* Command boxes */}
                         <div className="space-y-2">
@@ -634,24 +654,10 @@ export default function StudentContainers() {
                             <p className="text-xs text-green-700 mb-1">🔐 SSH Command (Run in Terminal 2):</p>
                             <div className="flex items-center gap-2">
                               <code className="text-xs bg-green-100 p-2 rounded flex-1">
-                                {sshInfo.portForwardSsh}
+                                ssh -i ~/.ssh/id_ed25519 -p 8023 {sshInfo.username}@127.0.0.1
                               </code>
                               <Button
-                                onClick={() => copyToClipboard(sshInfo.portForwardSsh)}
-                                className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white"
-                              >
-                                Copy
-                              </Button>
-                            </div>
-                          </div>
-                          <div>
-                            <p className="text-xs text-green-700 mb-1">🔑 Password:</p>
-                            <div className="flex items-center gap-2">
-                              <code className="text-xs bg-green-100 p-2 rounded flex-1">
-                                {sshInfo.password}
-                              </code>
-                              <Button
-                                onClick={() => copyToClipboard(sshInfo.password)}
+                                onClick={() => copyToClipboard(`ssh -i ~/.ssh/id_ed25519 -p 8023 ${sshInfo.username}@127.0.0.1`)}
                                 className="px-2 py-1 text-xs bg-green-600 hover:bg-green-700 text-white"
                               >
                                 Copy
@@ -661,18 +667,15 @@ export default function StudentContainers() {
                         </div>
 
                         {/* Troubleshooting section */}
-                        {sshInfo.troubleshooting && (
-                          <div className="mt-4 p-2 bg-yellow-50 border border-yellow-200 rounded">
-                            <p className="text-xs font-medium text-yellow-800 mb-2">🔧 Troubleshooting:</p>
-                            <div className="space-y-1">
-                              {Object.entries(sshInfo.troubleshooting).map(([issue, solution]) => (
-                                <div key={issue} className="text-xs text-yellow-700">
-                                  <strong>{issue.replace(/([A-Z])/g, ' $1').toLowerCase()}:</strong> {solution}
-                                </div>
-                              ))}
-                            </div>
+                        <div className="mt-4 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                          <p className="text-xs font-medium text-yellow-800 mb-2">🔧 Troubleshooting:</p>
+                          <div className="space-y-1 text-xs text-yellow-700">
+                            <div><strong>connection refused:</strong> Make sure the port-forward command is running in a separate terminal</div>
+                            <div><strong>port in use:</strong> Try a different port (e.g., 8024:22) in both commands</div>
+                            <div><strong>permission denied:</strong> Make sure you are using the correct SSH private key</div>
+                            <div><strong>command not found:</strong> Make sure kubectl is installed and configured</div>
                           </div>
-                        )}
+                        </div>
                       </div>
                     )}
 
@@ -696,7 +699,7 @@ export default function StudentContainers() {
               {sshInfo?.ready && sshInfo.portForwardCommand && (
                 <Button
                   onClick={() => copyToClipboard(
-                    `SSH Connection Instructions for Pod: ${selectedPod.name}\n\nStep-by-Step Instructions:\n1. Open a terminal/command prompt\n2. Run the port-forward command below (keep this terminal open)\n3. Open a new terminal window\n4. Run the SSH command below\n5. Enter the password when prompted\n\n=== TERMINAL 1: Port Forwarding (Keep this running) ===\n${sshInfo.portForwardCommand}\n\n=== TERMINAL 2: SSH Connection ===\n${sshInfo.portForwardSsh}\n\n=== Password ===\nWhen prompted, enter: ${sshInfo.password}\n\n=== Troubleshooting ===\n- Make sure Terminal 1 is still running the port-forward command\n- If port 8023 is in use, try changing it to 8024:22 in both commands\n- Make sure kubectl is installed and configured`
+                    `SSH Connection Instructions for Pod: ${selectedPod.name}\n\nStep-by-Step Instructions:\n1. Open a terminal/command prompt\n2. Run the port-forward command below (keep this terminal open)\n3. Open a new terminal window\n4. Run the SSH command below\n\n=== TERMINAL 1: Port Forwarding (Keep this running) ===\n${sshInfo.portForwardCommand}\n\n=== TERMINAL 2: SSH Connection ===\nssh -i ~/.ssh/id_ed25519 -p 8023 ${sshInfo.username}@127.0.0.1\n\n=== Troubleshooting ===\n- Make sure Terminal 1 is still running the port-forward command\n- If port 8023 is in use, try changing it to 8024:22 in both commands\n- Make sure kubectl is installed and configured`
                   )}
                   className="bg-green-600 hover:bg-green-700 text-white"
                 >

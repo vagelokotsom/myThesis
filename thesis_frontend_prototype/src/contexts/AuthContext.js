@@ -80,6 +80,10 @@ export const AuthProvider = ({ children }) => {
     return user?.role === 'ROLE_STUDENT';
   };
 
+  const isAdmin = () => {
+    return user?.role === 'ROLE_ADMIN';
+  };
+
   const value = {
     user,
     isAuthenticated,
@@ -87,7 +91,8 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     isTeacher,
-    isStudent
+    isStudent,
+    isAdmin
   };
 
   return (

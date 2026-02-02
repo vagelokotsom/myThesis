@@ -7,8 +7,10 @@ import com.thesis.backend.entity.Enrollment;
 import com.thesis.backend.repository.CourseRepository;
 import com.thesis.backend.repository.UserRepository;
 import com.thesis.backend.repository.EnrollmentRepository;
+import com.thesis.backend.entity.ContainerTemplate;
 import com.thesis.backend.entity.ImageTemplate;
 import com.thesis.backend.repository.ImageTemplateRepository;
+import com.thesis.backend.repository.ContainerTemplateRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
@@ -22,11 +24,12 @@ public class DataSeeder {
     private final CourseRepository courseRepository;
     private final EnrollmentRepository enrollmentRepository;
     private final ImageTemplateRepository imageTemplateRepository;
+    private final ContainerTemplateRepository containerTemplateRepository;
     private final PasswordEncoder passwordEncoder;
 
     @PostConstruct
     public void seed() {
-        if (userRepository.count() > 0 || courseRepository.count() > 0 || imageTemplateRepository.count() > 0) return;
+        if (userRepository.count() > 0 || courseRepository.count() > 0 || imageTemplateRepository.count() > 0 || containerTemplateRepository.count() > 0) return;
 
         // Create users
         User admin = new User();
@@ -98,5 +101,20 @@ public class DataSeeder {
             .storageSize("1Gi")
             .build();
         imageTemplateRepository.save(nginxWorkspace);
+
+        // Seed a public SSH-enabled container template for student self-provisioning
+        ContainerTemplate publicTemplate = ContainerTemplate.builder()
+            .name("Student SSH Workspace")
+            .description("Public SSH-enabled template for student self-provisioning.")
+            .dockerImage("thesis-ssh-container:latest")
+            .sshEnabled(true)
+            .persistentStorage(true)
+            .storageSize("1Gi")
+            .isPublic(true)
+            .category("Programming")
+            .difficultyLevel("Beginner")
+            .createdBy(teacher)
+            .build();
+        containerTemplateRepository.save(publicTemplate);
     }
 }

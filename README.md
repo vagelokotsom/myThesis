@@ -3,21 +3,21 @@
 
 ## **Επισκόπηση Συστήματος**
 
-Ένα ολοκληρωμένο σύστημα διαχείρισης εκπαιδευτικών containers που επιτρέπει σε καθηγητές να δημιουργούν SSH-enabled Ubuntu containers για φοιτητές, παρέχοντας ένα ασφαλές και ελεγχόμενο περιβάλλον εκμάθησης.
+Ένα ολοκληρωμένο σύστημα διαχείρισης εκπαιδευτικών containers που δίνει σε καθηγητές και φοιτητές ασφαλή, απομονωμένα εργαστηριακά περιβάλλοντα πάνω σε Kubernetes, με έλεγχο πόρων, RBAC και SSH πρόσβαση μέσω κλειδιών.
 
 ### 🚀 **Βασικά Χαρακτηριστικά**
-- ✅ **Backend (Spring Boot + Kubernetes)**: Δημιουργία πραγματικών SSH-enabled containers
-- ✅ **Frontend (React)**: Διαχείριση containers και εμφάνιση SSH οδηγιών
-- ✅ **Kubernetes Integration**: Πλήρης ενσωμάτωση με Minikube για deployment
-- ✅ **SSH Environment**: Οι φοιτητές μπορούν να συνδεθούν με SSH στα containers τους
-- ✅ **Real-time Status**: Αυτόματη ανανέωση κατάστασης containers κάθε 30 δευτερόλεπτα
-- ✅ **User Authentication**: Σύστημα εισόδου για καθηγητές και φοιτητές
-- ✅ **RBAC Integration**: Kubernetes Role-Based Access Control για ασφάλεια
+- ✅ **Backend (Spring Boot + Kubernetes)**: Αυτοματοποιημένη δημιουργία pods/namespace ανά φοιτητή
+- ✅ **Frontend (React)**: Διαχείριση containers και καθαρές SSH οδηγίες
+- ✅ **Kubernetes Integration**: Minikube deployment με RBAC + quotas
+- ✅ **SSH Access (Key‑based)**: Πρόσβαση χωρίς passwords μέσω δημόσιων κλειδιών
+- ✅ **Per‑student Isolation**: Namespace ανά φοιτητή, ξεκάθαρα όρια πόρων
+- ✅ **Admission Control (Kyverno)**: Έλεγχος requests/limits και αποκλεισμός privileged pods
+- ✅ **Real-time Status**: Αυτόματη ανανέωση κατάστασης containers
 
 ### 👥 **Ρόλοι Χρηστών**
-- **Καθηγητές**: Δημιουργία containers για φοιτητές, παρακολούθηση όλων των containers
-- **Φοιτητές**: Πρόσβαση στα δικά τους containers, SSH σύνδεση με αντιγραφή εντολών
-- **Διαχειριστές**: Πλήρη διαχείριση χρηστών και containers
+- **Καθηγητές**: Διαχείριση φοιτητών του μαθήματος, δημιουργία containers για φοιτητές, προβολή logs
+- **Φοιτητές**: Δημιουργία από shared templates στο δικό τους namespace, SSH σύνδεση με κλειδί
+- **Διαχειριστές**: Πλήρη διαχείριση χρηστών/μαθημάτων και πρόσβαση στο Kubernetes Management
 
 ---
 
@@ -200,34 +200,33 @@ curl http://127.0.0.1:63355/api/auth/test
 
 | Ρόλος | Δικαιώματα | Λειτουργίες |
 |-------|------------|-------------|
-| **Καθηγητής** | Container Management | Δημιουργία και διαχείριση containers για φοιτητές |
-| **Φοιτητής** | Personal Containers | Πρόσβαση και SSH σε προσωπικά containers |
-| **Διαχειριστής** | Full System Access | Πλήρη διαχείριση χρηστών και συστήματος |
+| **Καθηγητής** | Course Containers | Δημιουργία/διαχείριση containers για τους φοιτητές του |
+| **Φοιτητής** | Personal Namespace | Δημιουργία από shared templates, SSH με κλειδί |
+| **Διαχειριστής** | System Admin | Διαχείριση χρηστών/μαθημάτων & Kubernetes |
 
 ### **📋 Ροή Εργασίας**
 
 1. **Σύνδεση**: Εισαγωγή διαπιστευτηρίων που παρέχονται από τον διαχειριστή
-2. **Καθηγητής**: 
-   - Πρόσβαση στο "Container Management"
-   - Δημιουργία containers για φοιτητές
-   - Παρακολούθηση κατάστασης όλων των containers
+2. **Καθηγητής**:
+   - Πρόσβαση στο "Student Containers"
+   - Δημιουργία containers για φοιτητές / παρακολούθηση κατάστασης
 3. **Φοιτητής**:
-   - Πρόσβαση στο "My Containers" 
-   - Προβολή διαθέσιμων containers
-   - Λήψη SSH οδηγιών σύνδεσης
+   - Πρόσβαση στο "My Containers"
+   - Δημιουργία από shared templates στο δικό του namespace
+   - SSH σύνδεση μέσω public key
 
-## � **SSH Σύνδεση στα Student Containers**
+## 🔑 **SSH Σύνδεση στα Student Containers (Key‑based)**
 
 ### **📱 Μέσω Web Interface (Προτεινόμενο)**
 
 1. **Σύνδεση** στην εφαρμογή ως φοιτητής
 2. **Πήγαινε** στο "My Containers"
 3. **Πάτησε** "SSH Info" για το container σου
-4. **Αντέγραψε** τις εντολές από το popup
+4. **Αντέγραψε** τις εντολές από το popup (key‑based)
 
 ### **💻 Χειροκίνητη Σύνδεση**
 
-#### **Μέθοδος 1: Port Forwarding (Προτεινόμενο - Λειτουργεί Πάντα)**
+#### **Μέθοδος 1: Port Forwarding (Προτεινόμενο)**
 
 ```bash
 # Βήμα 1: Εύρεση του SSH service name
@@ -239,9 +238,8 @@ kubectl port-forward service/container-student1-20250924195230-ssh 8023:22
 # Θα δεις: "Forwarding from 127.0.0.1:8023 -> 22"
 # ΚΡΑΤΑ ΑΥΤΟ ΤΟ TERMINAL ΑΝΟΙΧΤΟ!
 
-# Βήμα 3: Άνοιγμα Terminal 2 - SSH Connection
-ssh -o StrictHostKeyChecking=no -p 8023 root@127.0.0.1
-# Password: student123
+# Βήμα 3: Άνοιγμα Terminal 2 - SSH Connection (με κλειδί)
+ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p 8023 root@127.0.0.1
 ```
 
 #### **Μέθοδος 2: Direct NodePort (Ενδέχεται να μη λειτουργεί σε macOS)**
@@ -255,9 +253,8 @@ minikube ip
 kubectl get svc | grep ssh
 # π.χ. 22:31456/TCP
 
-# Σύνδεση
-ssh -p 31456 root@192.168.49.2
-# Password: student123
+# Σύνδεση (με κλειδί)
+ssh -i ~/.ssh/id_ed25519 -p 31456 root@192.168.49.2
 ```
 
 ### **🔧 Αντιμετώπιση SSH Προβλημάτων**
@@ -283,10 +280,8 @@ kubectl describe service container-student1-20250924195230-ssh
 
 #### **Πρόβλημα: "Permission Denied"**
 ```bash
-# Χρήση του σωστού username και password
-ssh -o StrictHostKeyChecking=no -o PreferredAuthentications=password -p 8023 root@127.0.0.1
-# Username: root
-# Password: student123
+# Χρήση του σωστού SSH private key
+ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no -p 8023 root@127.0.0.1
 ```
 
 ## 🔍 Έλεγχος Κατάστασης
@@ -568,7 +563,7 @@ minikube dashboard
 ### 📸 Επιτυχημένη SSH Σύνδεση
 Το screenshot δείχνει πλήρη πρόσβαση στο Ubuntu container:
 ```bash
-ssh -p 8023 root@127.0.0.1
+ssh -i ~/.ssh/id_ed25519 -p 8023 root@127.0.0.1
 # Welcome to Ubuntu 20.04.6 LTS (GNU/Linux 6.10.14-linuxkit x86_64)
 # root@container-student-20250707150626:~#
 ```
@@ -577,7 +572,7 @@ ssh -p 8023 root@127.0.0.1
 
 
 **Το screenshot αποδεικνύει:**
-- ✅ Επιτυχή SSH authentication με password `student123`
+- ✅ Επιτυχή SSH authentication με key‑based πρόσβαση
 - ✅ Πλήρη shell access με root privileges  
 - ✅ Ubuntu 20.04.6 LTS environment
 - ✅ Network connectivity μέσω port forwarding

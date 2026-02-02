@@ -6,14 +6,26 @@ import { toast } from "react-hot-toast";
 import { useAuth } from "../contexts/AuthContext";
 import api from "../services/api";
 
+const SYSTEM_NAMESPACES = new Set([
+  "default",
+  "kube-system",
+  "kube-public",
+  "kube-node-lease",
+  "kubernetes-dashboard",
+  "kyverno",
+  "ingress-nginx",
+  "cert-manager"
+]);
+
 export default function KubernetesManagement() {
-  const { user, isTeacher } = useAuth();
+  const { user, isTeacher, isAdmin } = useAuth();
   const [activeTab, setActiveTab] = useState('pods');
   const [pods, setPods] = useState([]);
   const [deployments, setDeployments] = useState([]);
   const [namespaces, setNamespaces] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selectedNamespace, setSelectedNamespace] = useState('default');
+  const [showSystemNamespaces, setShowSystemNamespaces] = useState(false);
   
   // Create forms
   const [showCreatePod, setShowCreatePod] = useState(false);
@@ -47,8 +59,8 @@ export default function KubernetesManagement() {
   });
 
   useEffect(() => {
-    if (!isTeacher()) {
-      toast.error('Access denied. Teachers only.');
+    if (!isTeacher() && !isAdmin()) {
+      toast.error('Access denied. Teachers or admins only.');
       return;
     }
     
@@ -63,6 +75,18 @@ export default function KubernetesManagement() {
     
     loadDataWithDelay();
   }, [activeTab, selectedNamespace, user?.token]); // Watch user.token specifically
+
+  useEffect(() => {
+    if (!namespaces.length) return;
+    if (isAdmin()) return;
+
+    const preferred = namespaces.find(ns => ns.name !== "default");
+    const fallback = namespaces[0];
+    const nextNamespace = preferred?.name || fallback?.name;
+    if (nextNamespace && selectedNamespace !== nextNamespace) {
+      setSelectedNamespace(nextNamespace);
+    }
+  }, [namespaces, isAdmin, selectedNamespace]);
 
   const loadData = async () => {
     setLoading(true);
@@ -82,17 +106,27 @@ export default function KubernetesManagement() {
       }
       
       const namespacesData = await api.getAllNamespaces();
-      setNamespaces(namespacesData || []);
+      const safeNamespaces = namespacesData || [];
+      setNamespaces(safeNamespaces);
+
+      let effectiveNamespace = selectedNamespace;
+      if (!isAdmin() && safeNamespaces.length > 0 && selectedNamespace === 'default') {
+        const fallback = safeNamespaces.find(ns => ns.name !== 'default') || safeNamespaces[0];
+        if (fallback?.name) {
+          effectiveNamespace = fallback.name;
+          setSelectedNamespace(fallback.name);
+        }
+      }
 
       if (activeTab === 'pods') {
-        const podsData = selectedNamespace === 'all' 
+        const podsData = effectiveNamespace === 'all' && isAdmin()
           ? await api.getAllPods(true)
-          : await api.getPodsInNamespace(selectedNamespace);
+          : await api.getPodsInNamespace(effectiveNamespace);
         setPods(podsData || []);
       } else if (activeTab === 'deployments') {
-        const deploymentsData = selectedNamespace === 'all'
+        const deploymentsData = effectiveNamespace === 'all' && isAdmin()
           ? await api.getAllDeployments(true)
-          : await api.getDeploymentsInNamespace(selectedNamespace);
+          : await api.getDeploymentsInNamespace(effectiveNamespace);
         setDeployments(deploymentsData || []);
       }
     } catch (error) {
@@ -308,31 +342,63 @@ export default function KubernetesManagement() {
     return colors[status] || colors.Unknown;
   };
 
-  if (!isTeacher()) {
+  if (!isTeacher() && !isAdmin()) {
     return (
       <div className="p-6">
         <Card>
           <CardContent className="p-6">
             <h2 className="text-xl font-bold text-red-600">Access Denied</h2>
-            <p>This page is only accessible to teachers.</p>
+            <p>This page is only accessible to teachers or admins.</p>
           </CardContent>
         </Card>
       </div>
     );
   }
 
+  const visibleNamespaces = namespaces.filter(ns => {
+    if (isAdmin() && showSystemNamespaces) return true;
+    return !SYSTEM_NAMESPACES.has(ns.name);
+  });
+
+  const visiblePods = pods.filter(pod => {
+    if (isAdmin() && showSystemNamespaces) return true;
+    return !SYSTEM_NAMESPACES.has(pod.namespace);
+  });
+
+  const visibleDeployments = deployments.filter(deployment => {
+    if (isAdmin() && showSystemNamespaces) return true;
+    return !SYSTEM_NAMESPACES.has(deployment.namespace);
+  });
+
+  const tabs = isAdmin() ? ['pods', 'deployments', 'namespaces'] : ['pods'];
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-2xl font-bold">Kubernetes Management</h1>
-        <div className="flex space-x-2">
+        <div>
+          <h1 className="text-2xl font-bold">Kubernetes Management</h1>
+          {!isAdmin() && (
+            <p className="text-sm text-gray-500">Scoped to your students' namespaces.</p>
+          )}
+        </div>
+        <div className="flex space-x-2 items-center">
+          {isAdmin() && (
+            <label className="flex items-center space-x-2 text-sm text-gray-600">
+              <input
+                type="checkbox"
+                checked={showSystemNamespaces}
+                onChange={(e) => setShowSystemNamespaces(e.target.checked)}
+              />
+              <span>Show system namespaces</span>
+            </label>
+          )}
           <select
             value={selectedNamespace}
             onChange={(e) => setSelectedNamespace(e.target.value)}
             className="border rounded-md px-3 py-2"
           >
-            <option value="all">All Namespaces</option>
-            {namespaces.map((ns) => (
+            {isAdmin() && <option value="all">All Namespaces</option>}
+            {visibleNamespaces.map((ns) => (
               <option key={ns.name} value={ns.name}>
                 {ns.name}
               </option>
@@ -343,7 +409,7 @@ export default function KubernetesManagement() {
 
       {/* Tabs */}
       <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg w-fit">
-        {['pods', 'deployments', 'namespaces'].map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -359,35 +425,37 @@ export default function KubernetesManagement() {
       </div>
 
       {/* Create Buttons */}
-      <div className="flex space-x-2">
-        {activeTab === 'pods' && (
-          <Button
-            onClick={() => setShowCreatePod(true)}
-            className="bg-blue-600 hover:bg-blue-700"
-          >
-            Create Pod
-          </Button>
-        )}
-        {activeTab === 'deployments' && (
-          <Button
-            onClick={() => setShowCreateDeployment(true)}
-            className="bg-green-600 hover:bg-green-700"
-          >
-            Create Deployment
-          </Button>
-        )}
-        {activeTab === 'namespaces' && (
-          <Button
-            onClick={() => setShowCreateNamespace(true)}
-            className="bg-purple-600 hover:bg-purple-700"
-          >
-            Create Namespace
-          </Button>
-        )}
-      </div>
+      {isAdmin() && (
+        <div className="flex space-x-2">
+          {activeTab === 'pods' && (
+            <Button
+              onClick={() => setShowCreatePod(true)}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              Create Pod
+            </Button>
+          )}
+          {activeTab === 'deployments' && (
+            <Button
+              onClick={() => setShowCreateDeployment(true)}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              Create Deployment
+            </Button>
+          )}
+          {activeTab === 'namespaces' && (
+            <Button
+              onClick={() => setShowCreateNamespace(true)}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              Create Namespace
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Create Pod Form */}
-      {showCreatePod && (
+      {isAdmin() && showCreatePod && (
         <Card>
           <CardHeader>
             <CardTitle>Create New Pod</CardTitle>
@@ -443,7 +511,7 @@ export default function KubernetesManagement() {
       )}
 
       {/* Create Deployment Form */}
-      {showCreateDeployment && (
+      {isAdmin() && showCreateDeployment && (
         <Card>
           <CardHeader>
             <CardTitle>Create New Deployment</CardTitle>
@@ -506,7 +574,7 @@ export default function KubernetesManagement() {
       )}
 
       {/* Create Namespace Form */}
-      {showCreateNamespace && (
+      {isAdmin() && showCreateNamespace && (
         <Card>
           <CardHeader>
             <CardTitle>Create New Namespace</CardTitle>
@@ -544,7 +612,7 @@ export default function KubernetesManagement() {
       {/* Pods Tab */}
       {activeTab === 'pods' && !loading && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {pods.map((pod) => (
+          {visiblePods.map((pod) => (
             <Card key={`${pod.namespace}-${pod.name}`}>
               <CardHeader>
                 <div className="flex justify-between items-start">
@@ -601,7 +669,7 @@ export default function KubernetesManagement() {
       {/* Deployments Tab */}
       {activeTab === 'deployments' && !loading && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {deployments.map((deployment) => (
+          {visibleDeployments.map((deployment) => (
             <Card key={`${deployment.namespace}-${deployment.name}`}>
               <CardHeader>
                 <div className="flex justify-between items-start">

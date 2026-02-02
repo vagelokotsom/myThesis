@@ -8,6 +8,7 @@ import api from '../services/api';
 export default function StudentContainerManagement() {
   const { user, isTeacher } = useAuth();
   const [students, setStudents] = useState([]);
+  const [courses, setCourses] = useState([]);
   const [templateOptions, setTemplateOptions] = useState({
     containerTemplates: [],
     imageTemplates: []
@@ -23,6 +24,9 @@ export default function StudentContainerManagement() {
   const [selectedTier, setSelectedTier] = useState('standard');
   const [creating, setCreating] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedCourseId, setSelectedCourseId] = useState('all');
+  const [studentPage, setStudentPage] = useState(1);
+  const studentPageSize = 4;
 
   const totalTemplateCount = templateOptions.containerTemplates.length + templateOptions.imageTemplates.length;
 
@@ -65,6 +69,8 @@ export default function StudentContainerManagement() {
         api.getImageTemplates(),
         api.getAllContainers()
       ]);
+
+      const coursesData = await api.get("/courses");
       
       console.log('Raw students response:', studentsData);
       console.log('Raw container templates response:', containerTemplatesData);
@@ -72,6 +78,7 @@ export default function StudentContainerManagement() {
       console.log('Raw containers response:', containersData);
       
       setStudents(studentsData || []);
+      setCourses(coursesData || []);
       setTemplateOptions({
         containerTemplates: containerTemplatesData || [],
         imageTemplates: imageTemplatesData || []
@@ -181,6 +188,23 @@ export default function StudentContainerManagement() {
     return containers.filter(container => container.owner?.id === studentId);
   };
 
+  const enrolledStudentIds = selectedCourseId === 'all'
+    ? null
+    : (courses.find(course => String(course.id) === String(selectedCourseId))?.enrollments || [])
+        .map(enrollment => enrollment.student?.id)
+        .filter(Boolean);
+
+  const visibleStudents = enrolledStudentIds
+    ? students.filter(student => enrolledStudentIds.includes(student.id))
+    : students;
+
+  const totalStudentPages = Math.max(1, Math.ceil(visibleStudents.length / studentPageSize));
+  const currentStudentPage = Math.min(studentPage, totalStudentPages);
+  const pagedStudents = visibleStudents.slice(
+    (currentStudentPage - 1) * studentPageSize,
+    currentStudentPage * studentPageSize
+  );
+
   const getTemplateLabel = (container) => {
     if (container?.containerTemplate) {
       return container.containerTemplate.name || container.containerTemplate.dockerImage || 'Custom Template';
@@ -251,6 +275,22 @@ export default function StudentContainerManagement() {
       <div className="flex justify-between items-center">
         <h1 className="text-3xl font-bold">Student Container Management</h1>
         <div className="flex gap-3">
+          <select
+            value={selectedCourseId}
+            onChange={(e) => {
+              setSelectedCourseId(e.target.value);
+              setStudentPage(1);
+              setSelectedStudent('');
+            }}
+            className="border rounded-md px-3 py-2"
+          >
+            <option value="all">All Courses</option>
+            {courses.map(course => (
+              <option key={course.id} value={course.id}>
+                {course.name}
+              </option>
+            ))}
+          </select>
           <Button 
             onClick={handleRefresh}
             disabled={refreshing}
@@ -290,7 +330,7 @@ export default function StudentContainerManagement() {
                   className="w-full p-2 border rounded-md"
                 >
                   <option value="">Choose a student...</option>
-                  {students.map(student => (
+                  {visibleStudents.map(student => (
                     <option key={student.id} value={student.id}>
                       {student.username} ({student.email})
                     </option>
@@ -365,7 +405,7 @@ export default function StudentContainerManagement() {
 
       {/* Students and their containers */}
       <div className="grid gap-6">
-        {students.length === 0 ? (
+        {visibleStudents.length === 0 ? (
           <Card>
             <CardContent className="p-8 text-center">
               <div className="text-gray-400 mb-4">
@@ -380,7 +420,7 @@ export default function StudentContainerManagement() {
             </CardContent>
           </Card>
         ) : (
-          students.map(student => {
+          pagedStudents.map(student => {
           const studentContainers = getStudentContainers(student.id);
           
           return (
@@ -460,6 +500,30 @@ export default function StudentContainerManagement() {
         }
       </div>
 
+      {visibleStudents.length > 0 && (
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-gray-500">
+            Page {currentStudentPage} of {totalStudentPages}
+          </span>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setStudentPage(Math.max(1, currentStudentPage - 1))}
+              disabled={currentStudentPage === 1}
+            >
+              Prev
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setStudentPage(Math.min(totalStudentPages, currentStudentPage + 1))}
+              disabled={currentStudentPage === totalStudentPages}
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Quick Stats */}
       <Card>
         <CardHeader>
@@ -468,7 +532,7 @@ export default function StudentContainerManagement() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="text-center">
-              <div className="text-2xl font-bold text-blue-600">{students.length}</div>
+              <div className="text-2xl font-bold text-blue-600">{visibleStudents.length}</div>
               <div className="text-sm text-gray-600">Total Students</div>
             </div>
             <div className="text-center">

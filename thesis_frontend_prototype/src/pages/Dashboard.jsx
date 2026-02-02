@@ -8,12 +8,12 @@ import api from '../services/api';
 const Dashboard = () => {
   const { user, isAuthenticated } = useAuth();
   // Get user role from auth context
-  const userRole = user?.role || 'STUDENT';
+  const userRole = user?.role || 'ROLE_STUDENT';
 
   const fetchDashboardData = React.useCallback(async () => {
     try {
       setLoading(true);
-      if (userRole === 'TEACHER') {
+      if (userRole === 'ROLE_TEACHER') {
         const containers = await fetchTeacherStatistics();
         const recent = (containers || [])
           .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
@@ -122,7 +122,7 @@ const Dashboard = () => {
         ...prev,
         statistics: newStatistics,
         quickActions: [
-          { label: 'Manage Templates', icon: FaDocker, action: () => navigate('/container-templates'), color: 'success' },
+          { label: 'Manage Templates', icon: FaDocker, action: () => navigate('/templates'), color: 'success' },
           { label: 'Student Containers', icon: FaCube, action: () => navigate('/student-containers'), color: 'primary' }
         ]
       }));
@@ -154,7 +154,7 @@ const Dashboard = () => {
         ...prev,
         statistics: {
           totalContainers: containers.length,
-          activeContainers: containers.filter(c => c.status === 'running').length,
+          activeContainers: containers.filter(c => c.status === 'Running').length,
           templates: 0,
           totalPods: 0,
           runningPods: 0,
@@ -162,8 +162,8 @@ const Dashboard = () => {
           activeUsers: 0
         },
         quickActions: [
-          { label: 'My Containers', icon: FaDocker, action: () => navigate('/student-containers'), color: 'primary' },
-          { label: 'Create Container', icon: FaPlus, action: () => navigate('/student-containers'), color: 'success' }
+          { label: 'My Pods', icon: FaDocker, action: () => navigate('/pods'), color: 'primary' },
+          { label: 'Create Pod', icon: FaPlus, action: () => navigate('/pods'), color: 'success' }
         ]
       }));
     } catch (error) {
@@ -294,7 +294,7 @@ const Dashboard = () => {
     <Container fluid className="py-4">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h1 className="h3 mb-0">
-          {userRole === 'TEACHER' ? 'Teacher Dashboard' : 'Student Dashboard'}
+          {userRole === 'ROLE_TEACHER' ? 'Teacher Dashboard' : 'Student Dashboard'}
         </h1>
         <Button variant="outline-primary" onClick={fetchDashboardData} disabled={loading}>
           <i className="fas fa-sync-alt me-2"></i>
@@ -310,7 +310,7 @@ const Dashboard = () => {
 
       {/* Statistics Cards */}
       <Row className="g-4 mb-4">
-        {userRole === 'TEACHER' ? (
+        {userRole === 'ROLE_TEACHER' ? (
           <>
             <Col md={6} lg={3}>
               <StatCard
@@ -375,7 +375,7 @@ const Dashboard = () => {
 
       <Row className="g-4">
         {/* Quick Actions */}
-        <Col lg={userRole === 'TEACHER' ? 8 : 12}>
+        <Col lg={userRole === 'ROLE_TEACHER' ? 8 : 12}>
           <Card className="border-0 shadow-sm">
             <Card.Header className="bg-white border-bottom">
               <h5 className="mb-0">Quick Actions</h5>
@@ -383,7 +383,7 @@ const Dashboard = () => {
             <Card.Body>
               <Row className="g-3">
                 {dashboardData.quickActions.map((action, index) => (
-                  <Col md={6} lg={userRole === 'TEACHER' ? 3 : 6} key={index}>
+                  <Col md={6} lg={userRole === 'ROLE_TEACHER' ? 3 : 6} key={index}>
                     <Button
                       variant={`outline-${action.color}`}
                       className="w-100 p-3 h-100 d-flex flex-column align-items-center justify-content-center"
@@ -400,7 +400,7 @@ const Dashboard = () => {
         </Col>
 
         {/* System Status - Teacher Only */}
-        {userRole === 'TEACHER' && (
+        {userRole === 'ROLE_TEACHER' && (
           <Col lg={4}>
             <Card className="border-0 shadow-sm">
               <Card.Header className="bg-white border-bottom">

@@ -20,5 +20,10 @@ echo "${WORKSPACE_USER}:${STUDENT_PASSWORD}" | chpasswd
 mkdir -p /workspace
 chown "${WORKSPACE_USER}:${WORKSPACE_USER}" /workspace
 
-service ssh start >/dev/null 2>&1 || true
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+if [ -f /root/.ssh/authorized_keys ]; then
+  chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true
+fi
+
 exec /usr/sbin/sshd -D -e

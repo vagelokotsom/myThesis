@@ -22,8 +22,35 @@ public class CourseController {
     private final EnrollmentRepository enrollmentRepository;
 
     @GetMapping
-    public ResponseEntity<List<Course>> getAllCourses() {
-        return ResponseEntity.ok(courseRepository.findAll());
+    public ResponseEntity<List<CourseSummary>> getAllCourses(@org.springframework.security.core.annotation.AuthenticationPrincipal User user) {
+        if (user == null) {
+            return ResponseEntity.ok(List.of());
+        }
+
+        List<Course> courses = courseRepository.findAllWithEnrollments();
+
+        if ("ROLE_ADMIN".equals(user.getRole())) {
+            return ResponseEntity.ok(courses.stream().map(this::toCourseSummary).toList());
+        }
+
+        if ("ROLE_STUDENT".equals(user.getRole())) {
+            List<Course> studentCourses = courses.stream()
+                    .filter(course -> course.getEnrollments().stream()
+                            .anyMatch(enrollment -> enrollment.getStudent() != null
+                                    && enrollment.getStudent().getId().equals(user.getId())))
+                    .toList();
+            return ResponseEntity.ok(studentCourses.stream().map(this::toCourseSummary).toList());
+        }
+
+        if ("ROLE_TEACHER".equals(user.getRole())) {
+            List<Course> teacherCourses = courses.stream()
+                    .filter(course -> course.getTeacher() != null
+                            && course.getTeacher().getId().equals(user.getId()))
+                    .toList();
+            return ResponseEntity.ok(teacherCourses.stream().map(this::toCourseSummary).toList());
+        }
+
+        return ResponseEntity.ok(List.of());
     }
 
     @PostMapping
@@ -91,5 +118,82 @@ public class CourseController {
         private Long teacherId;
         public Long getTeacherId() { return teacherId; }
         public void setTeacherId(Long teacherId) { this.teacherId = teacherId; }
+    }
+
+    private CourseSummary toCourseSummary(Course course) {
+        CourseSummary summary = new CourseSummary();
+        summary.setId(course.getId());
+        summary.setName(course.getName());
+        summary.setDescription(course.getDescription());
+        if (course.getTeacher() != null) {
+            summary.setTeacher(UserSummary.from(course.getTeacher()));
+        }
+        summary.setEnrollments(course.getEnrollments().stream()
+                .map(enrollment -> EnrollmentSummary.from(enrollment))
+                .toList());
+        return summary;
+    }
+
+    public static class CourseSummary {
+        private Long id;
+        private String name;
+        private String description;
+        private UserSummary teacher;
+        private List<EnrollmentSummary> enrollments;
+
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+        public UserSummary getTeacher() { return teacher; }
+        public void setTeacher(UserSummary teacher) { this.teacher = teacher; }
+        public List<EnrollmentSummary> getEnrollments() { return enrollments; }
+        public void setEnrollments(List<EnrollmentSummary> enrollments) { this.enrollments = enrollments; }
+    }
+
+    public static class EnrollmentSummary {
+        private Long id;
+        private UserSummary student;
+
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        public UserSummary getStudent() { return student; }
+        public void setStudent(UserSummary student) { this.student = student; }
+
+        public static EnrollmentSummary from(Enrollment enrollment) {
+            EnrollmentSummary summary = new EnrollmentSummary();
+            summary.setId(enrollment.getId());
+            if (enrollment.getStudent() != null) {
+                summary.setStudent(UserSummary.from(enrollment.getStudent()));
+            }
+            return summary;
+        }
+    }
+
+    public static class UserSummary {
+        private Long id;
+        private String username;
+        private String email;
+        private String role;
+
+        public Long getId() { return id; }
+        public void setId(Long id) { this.id = id; }
+        public String getUsername() { return username; }
+        public void setUsername(String username) { this.username = username; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public String getRole() { return role; }
+        public void setRole(String role) { this.role = role; }
+
+        public static UserSummary from(User user) {
+            UserSummary summary = new UserSummary();
+            summary.setId(user.getId());
+            summary.setUsername(user.getUsername());
+            summary.setEmail(user.getEmail());
+            summary.setRole(user.getRole());
+            return summary;
+        }
     }
 }

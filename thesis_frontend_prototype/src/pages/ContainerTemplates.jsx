@@ -358,7 +358,7 @@ export default function ContainerTemplates() {
                     onChange={(e) => handleInputChange("sshEnabled", e.target.checked)}
                   />
                   <label htmlFor="sshEnabled" className="text-sm font-medium">SSH Enabled</label>
-                  <p className="text-xs text-gray-500 mt-1">If the image has no sshd (e.g., node/python), we attach a sidecar and keep it alive automatically.</p>
+                  <p className="text-xs text-gray-500 mt-1">If the image does not run sshd (e.g., node/python), SSH is provided via a sidecar and the main container is kept alive automatically.</p>
                 </div>
 
                 <div className="flex items-center space-x-2">

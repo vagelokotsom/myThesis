@@ -26,6 +26,7 @@ import java.util.Optional;
 @Slf4j
 @Component
 @RequiredArgsConstructor
+@Deprecated
 public class SshConnectionService {
     
     private final SshConnectionRepository sshConnectionRepository;
@@ -186,8 +187,8 @@ public class SshConnectionService {
     private boolean podHasSshCapability(Pod pod) {
         return pod.getSpec().getContainers().stream()
                 .anyMatch(container -> container.getPorts() != null && 
-                         container.getPorts().stream()
-                                 .anyMatch(port -> port.getContainerPort() == 22));
+                        container.getPorts().stream()
+                                .anyMatch(port -> port.getContainerPort() == 22));
     }
     
     /**

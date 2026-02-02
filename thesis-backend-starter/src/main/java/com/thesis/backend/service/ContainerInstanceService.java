@@ -19,6 +19,7 @@ import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodSpecBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.SecretBuilder;
 import io.fabric8.kubernetes.api.model.ServiceBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import lombok.RequiredArgsConstructor;
@@ -144,6 +145,15 @@ public class ContainerInstanceService {
         ContainerTemplate template = containerTemplateRepository.findById(templateId)
                 .orElseThrow(() -> new RuntimeException("Container template not found with id: " + templateId));
 
+        if (actor != null && "ROLE_STUDENT".equals(actor.getRole())) {
+            boolean sshEnabled = Boolean.TRUE.equals(template.getSshEnabled());
+            boolean isPublic = Boolean.TRUE.equals(template.getIsPublic());
+            boolean isOwner = template.getCreatedBy() != null && template.getCreatedBy().getId().equals(student.getId());
+            if (!sshEnabled || (!isPublic && !isOwner)) {
+                throw new RuntimeException("Students may only use public SSH-enabled templates");
+            }
+        }
+
         String timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         String templateSlug = template.getName() != null
                 ? template.getName().toLowerCase().replaceAll("[^a-z0-9]", "-")
@@ -250,6 +260,7 @@ public class ContainerInstanceService {
     ) {
         String effectiveNamespace = resolveNamespace(targetNamespace);
         boolean sshEnabledFlag = sshEnabled != null && sshEnabled;
+        String sshKeySecretName = null;
         Map<String, String> labels = new HashMap<>();
         labels.put("app", containerName);
         labels.put("owner", student.getUsername());
@@ -264,8 +275,11 @@ public class ContainerInstanceService {
             .withImage(resolvedImage)
             .withImagePullPolicy("IfNotPresent");
 
-        // Keep main container alive if it has no long-running process (non-SSH images)
-        if (!sshEnabledFlag) {
+        boolean sshReadyImage = sshEnabledFlag && resolvedImage.equals(sshImageName);
+        boolean useSidecar = !sshReadyImage;
+
+        // Keep main container alive when SSH is provided by a sidecar.
+        if (useSidecar) {
             mainContainer = mainContainer.withCommand(Arrays.asList("/bin/sh", "-c", "tail -f /dev/null"));
         }
 
@@ -305,6 +319,19 @@ public class ContainerInstanceService {
             mainContainer = resourcesBuilder.endResources();
         }
 
+        if (student.getSshPublicKey() != null && !student.getSshPublicKey().isBlank()) {
+            sshKeySecretName = ensureSshKeySecret(student, effectiveNamespace);
+            if (sshEnabledFlag) {
+                mainContainer = mainContainer
+                        .addNewVolumeMount()
+                            .withName("ssh-keys")
+                            .withMountPath("/root/.ssh/authorized_keys")
+                            .withSubPath("authorized_keys")
+                            .withReadOnly(true)
+                        .endVolumeMount();
+            }
+        }
+
         // Add persistent volume mount if required
         if (persistentStorage != null && persistentStorage) {
             mainContainer = mainContainer
@@ -315,9 +342,9 @@ public class ContainerInstanceService {
         }
 
         // Build the pod spec
-        // For SSH-enabled templates, expose SSH on the main container; otherwise attach sidecar
+        // Use main container SSH only for SSH-ready images; otherwise attach sidecar.
         PodSpecBuilder podSpecBuilder = new PodSpecBuilder();
-        if (sshEnabledFlag) {
+        if (!useSidecar) {
             mainContainer = mainContainer
                     .addNewPort()
                         .withContainerPort(22)
@@ -335,7 +362,12 @@ public class ContainerInstanceService {
             podSpecBuilder = podSpecBuilder.addToContainers(mainContainer.build());
         } else {
             int sidecarSshPort = 2222;
-            String sidecarCmd = String.format("echo \"root:%s\" | chpasswd && /usr/sbin/sshd -D -p %d -o PermitRootLogin=yes -o PasswordAuthentication=yes",
+            String sidecarCmd = String.format(
+                    "mkdir -p /root/.ssh && chmod 700 /root/.ssh && " +
+                    "if [ -f /root/.ssh/authorized_keys ]; then chmod 600 /root/.ssh/authorized_keys 2>/dev/null || true; fi && " +
+                    "echo \"root:%s\" | chpasswd && " +
+                    "/usr/sbin/sshd -D -p %d -o PermitRootLogin=yes -o PasswordAuthentication=yes " +
+                    "-o PubkeyAuthentication=yes -o AuthorizedKeysFile=/root/.ssh/authorized_keys -o StrictModes=no",
                     studentSshPassword, sidecarSshPort);
             ContainerBuilder sshSidecar = new ContainerBuilder()
                     .withName("ssh-sidecar")
@@ -355,6 +387,16 @@ public class ContainerInstanceService {
                         .withName("SSH_ENABLED")
                         .withValue("true")
                     .endEnv();
+
+            if (sshKeySecretName != null) {
+                sshSidecar = sshSidecar
+                        .addNewVolumeMount()
+                            .withName("ssh-keys")
+                            .withMountPath("/root/.ssh/authorized_keys")
+                            .withSubPath("authorized_keys")
+                            .withReadOnly(true)
+                        .endVolumeMount();
+            }
 
             if (persistentStorage != null && persistentStorage) {
                 sshSidecar = sshSidecar
@@ -378,6 +420,17 @@ public class ContainerInstanceService {
                 .endVolume();
         }
 
+        if (sshKeySecretName != null) {
+            podSpecBuilder = podSpecBuilder
+                .addNewVolume()
+                    .withName("ssh-keys")
+                    .withNewSecret()
+                        .withSecretName(sshKeySecretName)
+                        .withDefaultMode(0600)
+                    .endSecret()
+                .endVolume();
+        }
+
         // Build the complete pod
         Pod pod = new PodBuilder()
                 .withNewMetadata()
@@ -397,14 +450,36 @@ public class ContainerInstanceService {
         kubernetesClient.pods().inNamespace(effectiveNamespace).resource(pod).create();
 
         // Create NodePort service for SSH access if enabled
-        if (sshEnabled != null && sshEnabled) {
-            createNodePortService(containerName, labels, effectiveNamespace, new IntOrString(22));
-        } else {
+        if (useSidecar) {
             createNodePortService(containerName, labels, effectiveNamespace, new IntOrString(2222));
+        } else {
+            createNodePortService(containerName, labels, effectiveNamespace, new IntOrString(22));
         }
 
         log.info("Created unified Kubernetes pod {} for student {}", containerName, student.getUsername());
         return containerName;
+    }
+
+    private String ensureSshKeySecret(User student, String namespace) {
+        String publicKey = student.getSshPublicKey();
+        if (publicKey == null || publicKey.isBlank()) {
+            return null;
+        }
+
+        String secretName = String.format("student-%d-ssh-key", student.getId());
+        kubernetesClient.secrets()
+                .inNamespace(namespace)
+                .resource(new SecretBuilder()
+                        .withNewMetadata()
+                            .withName(secretName)
+                            .withNamespace(namespace)
+                        .endMetadata()
+                        .withType("Opaque")
+                        .addToStringData("authorized_keys", publicKey.trim())
+                        .build())
+                .serverSideApply();
+
+        return secretName;
     }
     
 
@@ -464,10 +539,10 @@ public class ContainerInstanceService {
             throw new RuntimeException("Access denied");
         }
         
-        // Only recreate Kubernetes resources for containers created from image templates for now
-        ImageTemplate template = instance.getImageTemplate();
-        if (template == null) {
-            throw new RuntimeException("Restart is currently supported only for image-template based containers. Please recreate the container from its template.");
+        ImageTemplate imageTemplate = instance.getImageTemplate();
+        ContainerTemplate containerTemplate = instance.getContainerTemplate();
+        if (imageTemplate == null && containerTemplate == null) {
+            throw new RuntimeException("Restart is currently supported only for template-based containers.");
         }
 
         String containerName = instance.getKubernetesPodName();
@@ -491,17 +566,37 @@ public class ContainerInstanceService {
         instance.setStatus("Starting");
         containerInstanceRepository.save(instance);
 
-        createUnifiedKubernetesPod(
-                containerName,
-                template.getDockerImage(),
-                instance.getOwner(),
-                template.getResourceLimits(),
-                template.getEnvironmentVars(),
-                template.getPersistentStorage(),
-                template.getStorageSize(),
-                true,
-                effectiveNamespace
-        );
+        if (imageTemplate != null) {
+            createUnifiedKubernetesPod(
+                    containerName,
+                    imageTemplate.getDockerImage(),
+                    instance.getOwner(),
+                    imageTemplate.getResourceLimits(),
+                    imageTemplate.getEnvironmentVars(),
+                    imageTemplate.getPersistentStorage(),
+                    imageTemplate.getStorageSize(),
+                    true,
+                    effectiveNamespace
+            );
+        } else {
+            Map<String, String> resourceLimits = parseResourceLimits(containerTemplate.getResourceLimits());
+            Map<String, String> environmentVars = parseEnvironmentVariables(containerTemplate.getEnvironmentVars());
+            boolean persistentStorage = Boolean.TRUE.equals(containerTemplate.getPersistentStorage());
+            String storageSize = containerTemplate.getStorageSize();
+            Boolean sshEnabled = containerTemplate.getSshEnabled() != null ? containerTemplate.getSshEnabled() : Boolean.TRUE;
+
+            createUnifiedKubernetesPod(
+                    containerName,
+                    containerTemplate.getDockerImage(),
+                    instance.getOwner(),
+                    resourceLimits,
+                    environmentVars,
+                    persistentStorage,
+                    storageSize,
+                    sshEnabled,
+                    effectiveNamespace
+            );
+        }
 
         // Update status asynchronously based on the real pod state
         updateContainerStatus(instance);
@@ -527,6 +622,13 @@ public class ContainerInstanceService {
             
             // Delete the SSH service
             kubernetesClient.services().inNamespace(effectiveNamespace).withName(instance.getKubernetesPodName() + "-ssh").delete();
+
+            // Clean up PVC if it exists for this container
+            String pvcName = instance.getKubernetesPodName() + "-pvc";
+            kubernetesClient.persistentVolumeClaims()
+                    .inNamespace(effectiveNamespace)
+                    .withName(pvcName)
+                    .delete();
             
             log.info("Deleted Kubernetes pod and service for container {}", instance.getName());
         } catch (Exception e) {

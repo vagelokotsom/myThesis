@@ -157,6 +157,14 @@ public class ContainerController {
                 // Students see only their own containers
                 containers = containerInstanceService.getStudentContainers(user);
             }
+            // Refresh statuses to avoid stale UI state
+            for (ContainerInstance container : containers) {
+                try {
+                    containerInstanceService.updateContainerStatus(container);
+                } catch (Exception e) {
+                    log.warn("Failed to refresh status for container {}: {}", container.getId(), e.getMessage());
+                }
+            }
             return ResponseEntity.ok(containers);
         } catch (Exception e) {
             log.error("Failed to fetch user containers for user: {}", user.getUsername(), e);

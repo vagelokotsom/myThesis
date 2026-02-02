@@ -6,7 +6,7 @@ import { Button } from "../components/ui/button";
 import { useAuth } from "../contexts/AuthContext";
 
 export default function CourseManagement() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const [courses, setCourses] = useState([]);
   const [newCourse, setNewCourse] = useState({ name: "", description: "" });
   const [loading, setLoading] = useState(false);
@@ -14,6 +14,10 @@ export default function CourseManagement() {
   const [selectedCourseId, setSelectedCourseId] = useState(null);
   const [selectedUserId, setSelectedUserId] = useState("");
   const [selectedTeacherId, setSelectedTeacherId] = useState("");
+  const [courseSearch, setCourseSearch] = useState("");
+  const [coursePage, setCoursePage] = useState(1);
+  const [userSearch, setUserSearch] = useState("");
+  const coursePageSize = 5;
   const teacherOptions = users.filter(u => u.role === "ROLE_TEACHER");
   const handleAssignTeacher = async (courseId, teacherId) => {
     if (!teacherId) return;
@@ -52,7 +56,9 @@ export default function CourseManagement() {
       if (user?.token) {
         api.setToken(user.token);
       }
-      const data = await api.get("/superadmin/users");
+      const data = isAdmin()
+        ? await api.get("/superadmin/users")
+        : await api.get("/users/students");
       setUsers(data);
     } catch (error) {
       console.error("Failed to load users:", error);
@@ -100,6 +106,31 @@ export default function CourseManagement() {
     }
   };
 
+  const filteredCourses = courses.filter(course => {
+    const query = courseSearch.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      course.name?.toLowerCase().includes(query) ||
+      course.description?.toLowerCase().includes(query)
+    );
+  });
+
+  const totalCoursePages = Math.max(1, Math.ceil(filteredCourses.length / coursePageSize));
+  const currentCoursePage = Math.min(coursePage, totalCoursePages);
+  const pagedCourses = filteredCourses.slice(
+    (currentCoursePage - 1) * coursePageSize,
+    currentCoursePage * coursePageSize
+  );
+
+  const filteredUsers = users.filter(u => {
+    const query = userSearch.trim().toLowerCase();
+    if (!query) return true;
+    return (
+      u.username?.toLowerCase().includes(query) ||
+      u.email?.toLowerCase().includes(query)
+    );
+  });
+
   return (
     <div className="p-6 space-y-6">
       <Card>
@@ -122,41 +153,60 @@ export default function CourseManagement() {
       <Card>
         <CardTitle>All Courses</CardTitle>
         <CardContent>
-          {courses.map(course => (
+          <div className="mb-3 flex items-center gap-2">
+            <Input
+              placeholder="Search courses..."
+              value={courseSearch}
+              onChange={e => {
+                setCourseSearch(e.target.value);
+                setCoursePage(1);
+              }}
+            />
+            <Input
+              placeholder="Search users..."
+              value={userSearch}
+              onChange={e => setUserSearch(e.target.value)}
+            />
+          </div>
+          {pagedCourses.map(course => (
             <div key={course.id} className="border-b py-4">
               <div className="flex justify-between items-center">
                 <span>
                   <span className="font-semibold">{course.name}</span>
                   <span className="text-xs text-gray-500 ml-2">{course.description}</span>
                 </span>
-                <Button className="bg-red-500" onClick={() => handleDeleteCourse(course.id)} disabled={loading}>Delete</Button>
+                {isAdmin() && (
+                  <Button className="bg-red-500" onClick={() => handleDeleteCourse(course.id)} disabled={loading}>Delete</Button>
+                )}
               </div>
               <div className="mt-2 flex gap-4">
                 {/* Teacher assignment UI */}
-                <div className="flex gap-2 items-center">
-                  <select
-                    value={selectedCourseId === course.id ? selectedTeacherId : ""}
-                    onChange={e => {
-                      setSelectedCourseId(course.id);
-                      setSelectedTeacherId(e.target.value);
-                    }}
-                    className="border rounded px-2 py-1"
-                  >
-                    <option value="">Assign teacher</option>
-                    {teacherOptions.map(teacher => (
-                      <option key={teacher.id} value={teacher.id}>{teacher.username}</option>
-                    ))}
-                  </select>
-                  <Button
-                    onClick={() => handleAssignTeacher(course.id, selectedTeacherId)}
-                    disabled={loading || !selectedTeacherId}
-                  >Assign</Button>
-                  {course.teacher ? (
-                    <span className="ml-2 text-sm text-green-700">Assigned: {course.teacher.username}</span>
-                  ) : (
-                    <span className="ml-2 text-sm text-gray-500">No teacher assigned</span>
-                  )}
-                </div>
+                {isAdmin() && (
+                  <div className="flex gap-2 items-center">
+                    <select
+                      value={selectedCourseId === course.id ? selectedTeacherId : ""}
+                      onChange={e => {
+                        setSelectedCourseId(course.id);
+                        setSelectedTeacherId(e.target.value);
+                      }}
+                      className="border rounded px-2 py-1"
+                    >
+                      <option value="">Assign teacher</option>
+                      {teacherOptions.map(teacher => (
+                        <option key={teacher.id} value={teacher.id}>{teacher.username}</option>
+                      ))}
+                    </select>
+                    <Button
+                      onClick={() => handleAssignTeacher(course.id, selectedTeacherId)}
+                      disabled={loading || !selectedTeacherId}
+                    >Assign</Button>
+                    {course.teacher ? (
+                      <span className="ml-2 text-sm text-green-700">Assigned: {course.teacher.username}</span>
+                    ) : (
+                      <span className="ml-2 text-sm text-gray-500">No teacher assigned</span>
+                    )}
+                  </div>
+                )}
                 {/* Enrollment UI */}
                 <div className="flex gap-2 items-center">
                   <select
@@ -168,9 +218,16 @@ export default function CourseManagement() {
                     className="border rounded px-2 py-1"
                   >
                     <option value="">Select user to enroll</option>
-                    {users.map(user => (
-                      <option key={user.id} value={user.id}>{user.username} ({user.role.replace("ROLE_", "")})</option>
-                    ))}
+                    {filteredUsers
+                      .filter(user => {
+                        const enrolledIds = course.enrollments ? course.enrollments.map(e => e.student.id) : [];
+                        return !enrolledIds.includes(user.id);
+                      })
+                      .map(user => (
+                        <option key={user.id} value={user.id}>
+                          {user.username} ({user.email})
+                        </option>
+                      ))}
                   </select>
                   <Button
                     onClick={() => handleEnrollUser(course.id, selectedUserId)}
@@ -181,9 +238,9 @@ export default function CourseManagement() {
               <div className="mt-2">
                 <span className="font-semibold text-sm">Enrolled Users:</span>
                 <ul className="ml-4 list-disc">
-                  {course.enrolledUsers && course.enrolledUsers.length > 0 ? (
-                    course.enrolledUsers.map(u => (
-                      <li key={u.id}>{u.username} ({u.role.replace("ROLE_", "")})</li>
+                  {course.enrollments && course.enrollments.length > 0 ? (
+                    course.enrollments.map(e => (
+                      <li key={e.student.id}>{e.student.username} ({e.student.email})</li>
                     ))
                   ) : (
                     <li className="text-gray-400">No users enrolled</li>
@@ -192,6 +249,27 @@ export default function CourseManagement() {
               </div>
             </div>
           ))}
+          <div className="mt-4 flex items-center justify-between">
+            <span className="text-sm text-gray-500">
+              Page {currentCoursePage} of {totalCoursePages}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setCoursePage(Math.max(1, currentCoursePage - 1))}
+                disabled={currentCoursePage === 1}
+              >
+                Prev
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setCoursePage(Math.min(totalCoursePages, currentCoursePage + 1))}
+                disabled={currentCoursePage === totalCoursePages}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

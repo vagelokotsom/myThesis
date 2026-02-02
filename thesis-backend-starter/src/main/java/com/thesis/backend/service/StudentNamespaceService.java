@@ -8,6 +8,8 @@ import io.fabric8.kubernetes.api.model.NamespaceBuilder;
 import io.fabric8.kubernetes.api.model.Quantity;
 import io.fabric8.kubernetes.api.model.ResourceQuota;
 import io.fabric8.kubernetes.api.model.ResourceQuotaBuilder;
+import io.fabric8.kubernetes.api.model.ServiceAccount;
+import io.fabric8.kubernetes.api.model.ServiceAccountBuilder;
 import io.fabric8.kubernetes.api.model.rbac.Role;
 import io.fabric8.kubernetes.api.model.rbac.RoleBuilder;
 import io.fabric8.kubernetes.api.model.rbac.RoleBinding;
@@ -130,6 +132,15 @@ public class StudentNamespaceService {
         kubernetesClient.namespaces().resource(ns).serverSideApply();
         log.debug("Ensured namespace {}", namespace);
 
+        String serviceAccountName = String.format("student-%d-sa", student.getId());
+        ServiceAccount serviceAccount = new ServiceAccountBuilder()
+                .withNewMetadata()
+                    .withName(serviceAccountName)
+                    .withNamespace(namespace)
+                .endMetadata()
+                .build();
+        kubernetesClient.resource(serviceAccount).serverSideApply();
+
         ResourceQuota quota = new ResourceQuotaBuilder()
                 .withNewMetadata()
                     .withName("student-standard-quota")
@@ -179,7 +190,7 @@ public class StudentNamespaceService {
                 .endMetadata()
                 .addNewRule()
                     .withApiGroups("")
-                    .withResources("pods", "pods/log", "services", "persistentvolumeclaims")
+                    .withResources("pods", "pods/log", "pods/portforward", "services", "persistentvolumeclaims")
                     .withVerbs("get", "list", "watch", "create", "update", "patch", "delete")
                 .endRule()
                 .build();
@@ -188,6 +199,11 @@ public class StudentNamespaceService {
         Subject subject = new Subject();
         subject.setKind("User");
         subject.setName(student.getUsername());
+
+        Subject saSubject = new Subject();
+        saSubject.setKind("ServiceAccount");
+        saSubject.setName(serviceAccountName);
+        saSubject.setNamespace(namespace);
 
         RoleRef roleRef = new RoleRef();
         roleRef.setKind("Role");
@@ -200,7 +216,7 @@ public class StudentNamespaceService {
                     .withNamespace(namespace)
                 .endMetadata()
                 .withRoleRef(roleRef)
-                .withSubjects(subject)
+                .withSubjects(subject, saSubject)
                 .build();
         kubernetesClient.resource(binding).serverSideApply();
 

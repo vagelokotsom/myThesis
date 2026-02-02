@@ -1,5 +1,5 @@
 import { Toaster } from "react-hot-toast";
-import { BrowserRouter, Routes, Route, Outlet } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Outlet, Navigate } from "react-router-dom";
 
 import LoginPage from "./pages/LoginPage";
 import Dashboard from "./pages/Dashboard";
@@ -38,7 +38,7 @@ function App() {
           <Route element={<Layout />}>
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/pods" element={<PodManagement />} />
-            <Route path="/containers" element={<StudentContainers />} />
+            <Route path="/containers" element={<Navigate to="/pods" replace />} />
             <Route path="/courses" element={
               <ProtectedRoute requireRole="ROLE_TEACHER">
                 <CourseManagement />
@@ -55,7 +55,7 @@ function App() {
               </ProtectedRoute>
             } />
             <Route path="/kubernetes" element={
-              <ProtectedRoute requireRole="ROLE_TEACHER">
+              <ProtectedRoute requireRoles={["ROLE_TEACHER", "ROLE_ADMIN"]}>
                 <KubernetesManagement />
               </ProtectedRoute>
             } />

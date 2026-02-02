@@ -5,7 +5,7 @@ import { toast } from "react-hot-toast";
 export default function Navbar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, logout, isTeacher, isStudent } = useAuth();
+  const { user, logout, isTeacher, isStudent, isAdmin } = useAuth();
 
   const handleLogout = () => {
     logout();
@@ -14,6 +14,7 @@ export default function Navbar() {
   };
 
   const getRoleDisplay = () => {
+    if (isAdmin()) return "Admin";
     if (isTeacher()) return "Teacher";
     if (isStudent()) return "Student";
     return "User";
@@ -64,7 +65,20 @@ export default function Navbar() {
                 Student Containers
               </Link>
             </li>
-            
+          </>
+        )}
+
+        {isAdmin() && (
+          <>
+            <li className="mr-6">
+              <Link
+                to="/superadmin"
+                className={`hover:text-gray-300 ${location.pathname === "/superadmin" ? "font-bold underline" : ""
+                  }`}
+              >
+                Admin
+              </Link>
+            </li>
             <li className="mr-6">
               <Link
                 to="/kubernetes"
@@ -84,22 +98,11 @@ export default function Navbar() {
             className={`hover:text-gray-300 ${location.pathname === "/pods" ? "font-bold underline" : ""
               }`}
           >
-            {isTeacher() ? "Pod Management" : "My Containers"}
+            {isTeacher() || isAdmin() ? "All Pods" : "My Containers"}
           </Link>
         </li>
 
         {/* Student-specific navigation */}
-        {isStudent() && (
-          <li className="mr-6">
-            <Link
-              to="/containers"
-              className={`hover:text-gray-300 ${location.pathname === "/containers" ? "font-bold underline" : ""
-                }`}
-            >
-              Container Dashboard
-            </Link>
-          </li>
-        )}
 
         {/* User info and logout aligned to top-right corner */}
         <li className="ml-auto flex items-center space-x-4">

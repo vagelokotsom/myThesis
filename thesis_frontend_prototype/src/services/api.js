@@ -411,8 +411,8 @@ class ApiService {
   }
 
   // Enhanced Container Instance Management
-  async createContainerFromTemplate(imageId, studentId = null) {
-    return await this.createContainerInstance({ imageId, studentId });
+  async createContainerFromTemplate(templateId, studentId = null) {
+    return await this.createContainerInstance({ containerTemplateId: templateId, studentId });
   }
 
   async getContainerStatus(id) {
@@ -430,8 +430,43 @@ class ApiService {
     return await this.request('/users/students');
   }
 
+  async searchStudents(query = '', page = 0, size = 10) {
+    const params = new URLSearchParams();
+    if (query) params.set('query', query);
+    params.set('page', page);
+    params.set('size', size);
+    return await this.request(`/users/students/search?${params.toString()}`);
+  }
+
   async getAllUsers() {
     return await this.request('/users');
+  }
+
+  async getCurrentUser() {
+    return await this.request('/users/me');
+  }
+
+  async updateSshPublicKey(publicKey) {
+    return await this.request('/users/me/ssh-key', {
+      method: 'PUT',
+      body: JSON.stringify({ publicKey })
+    });
+  }
+
+  async deleteSshPublicKey() {
+    return await this.request('/users/me/ssh-key', {
+      method: 'DELETE'
+    });
+  }
+
+  async downloadKubeconfig() {
+    return await this.request('/kubernetes/kubeconfig', {
+      method: 'GET'
+    });
+  }
+
+  async getKubeconfigText() {
+    return await this.downloadKubeconfig();
   }
 
   async getUserContainers(userId) {

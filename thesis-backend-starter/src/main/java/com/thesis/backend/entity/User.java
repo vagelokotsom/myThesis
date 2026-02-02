@@ -34,6 +34,9 @@ public class User implements UserDetails {
     @Column(name = "role")
     private String role;  // Will store "ROLE_TEACHER" or "ROLE_STUDENT"
 
+    @Column(name = "ssh_public_key", columnDefinition = "TEXT")
+    private String sshPublicKey;
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return Collections.singletonList(new SimpleGrantedAuthority(role));
