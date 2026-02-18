@@ -190,8 +190,13 @@ public class StudentNamespaceService {
                 .endMetadata()
                 .addNewRule()
                     .withApiGroups("")
-                    .withResources("pods", "pods/log", "pods/portforward", "services", "persistentvolumeclaims")
+                    .withResources("pods", "pods/log", "services", "persistentvolumeclaims")
                     .withVerbs("get", "list", "watch", "create", "update", "patch", "delete")
+                .endRule()
+                .addNewRule()
+                    .withApiGroups("")
+                    .withResources("pods/portforward")
+                    .withVerbs("create")
                 .endRule()
                 .build();
         kubernetesClient.resource(studentRole).serverSideApply();
